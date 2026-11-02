@@ -14,3 +14,6 @@ venv/
 .env
 .env.*
 credentials.json
+
+# Local data catalogue, exports and crawl logs
+data/
