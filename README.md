@@ -93,3 +93,49 @@ uv run python -m worldquant_consultant_project.acquisition `
 `data_fields` 的主键为 `(instrument_type, region, delay, universe, dataset_id, field_id)`，
 重复运行以 upsert 写入，不会产生重复行。
 
+## 字段打标签（DeepSeek → brain.db）
+
+子包：[`src/worldquant_consultant_project/labeling/`](./src/worldquant_consultant_project/labeling/)
+读取 `credentials.json` 的 `deepseek_api_key`（也可用环境变量 `DEEPSEEK_API_KEY` 覆盖），
+系统提示词来自 [`system_prompt.txt`](./system_prompt.txt)，模型默认 `deepseek-flash`
+（关闭思考模式 + JSON 输出）。
+
+### 运行
+
+```powershell
+# 先预览提示词与待处理数量（不调用 API）
+uv run python -m worldquant_consultant_project.labeling --dry-run
+
+# 冒烟：只打 20 条
+uv run python -m worldquant_consultant_project.labeling --limit 20
+
+# 全量（断点续跑，已成功的字段自动跳过）
+uv run python -m worldquant_consultant_project.labeling
+```
+
+### 参数
+
+| 参数 | 说明 |
+|---|---|
+| `--limit 20` | 只处理 N 个字段（冒烟） |
+| `--dataset fundamental6,pv1` | 只处理指定数据集 |
+| `--workers 8` | 并发线程数（默认 8） |
+| `--model deepseek-flash` | 模型名，换模型时标签写入独立的列前缀需另行扩展 |
+| `--thinking` | 启用思考模式（默认关闭，分类任务无需） |
+| `--force` | 忽略已成功的记录，强制重新打标签 |
+| `--dry-run` | 打印首条 user prompt 与待处理数，不调用 API |
+| `--db` / `--prompt` / `--credentials` / `--log-dir` | 路径覆盖 |
+
+退出码：`0` 全部成功；`2` 凭证或提示词缺失；`3` 部分字段失败（重新执行即可续跑）。
+
+### 写入内容
+
+- 按 `(dataset_id, field_id)` 去重后调用模型（4,367 次而非 26,202 次），结果一次 `UPDATE`
+  回填该字段在 6 个 universe 下的所有行
+- `data_fields` 末尾新增 5 列（值均限定在 `system_prompt.txt` 的枚举内）：
+  `deepseek_category`、`deepseek_math_dimension`、`deepseek_polarity`、
+  `deepseek_domain_support`、`deepseek_frequency`
+- 审计表 `deepseek_labels`（主键 `model + dataset_id + field_id`）记录原始响应、
+  token 用量、重试次数、状态（`ok` / `invalid` / `error`）与提示词 sha256
+- 视图 `v_deepseek_field_labels`：已打标签字段的扁平视图，便于下游取用
+
