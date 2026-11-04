@@ -61,6 +61,8 @@ METADATA_COLUMNS: tuple[tuple[str, str], ...] = (
     ("alpha_id", "TEXT"),
     ("status", "TEXT NOT NULL"),
     ("has_error", "INTEGER NOT NULL DEFAULT 0"),
+    ("submittable", "INTEGER"),
+    ("submit_blockers", "TEXT"),
     ("error", "TEXT"),
     ("submitted_at", "TEXT NOT NULL"),
     ("finished_at", "TEXT"),
@@ -111,6 +113,39 @@ def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+BLOCKING_RESULTS = frozenset({"FAIL", "PENDING"})
+
+
+def derive_submittable(alpha: Mapping[str, Any] | None) -> tuple[int | None, str | None]:
+    """Decide whether BRAIN would allow submitting this alpha.
+
+    BRAIN exposes no "submittable" flag: submission is gated by the IS checks, so the
+    alpha is submittable only when every check passed (no FAIL, no PENDING).
+    """
+    if not alpha:
+        return None, None
+    block = alpha.get("is")
+    if not isinstance(block, Mapping):
+        return None, None
+    checks = [c for c in (block.get("checks") or []) if isinstance(c, Mapping)]
+    if not checks:
+        return None, None
+
+    blockers = [
+        {
+            "name": check.get("name"),
+            "result": check.get("result"),
+            "value": check.get("value"),
+            "limit": check.get("limit"),
+        }
+        for check in checks
+        if str(check.get("result") or "").upper() in BLOCKING_RESULTS
+    ]
+    if blockers:
+        return 0, json.dumps(blockers, ensure_ascii=False)
+    return 1, None
+
+
 def connect(path: Path | str) -> sqlite3.Connection:
     db_path = Path(path)
     db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -119,8 +154,45 @@ def connect(path: Path | str) -> sqlite3.Connection:
     connection.execute("PRAGMA journal_mode = WAL")
     migrate_legacy(connection)
     connection.executescript(_schema_sql())
+    ensure_columns(connection)
+    backfill_submittable(connection)
     connection.commit()
     return connection
+
+
+def ensure_columns(connection: sqlite3.Connection) -> list[str]:
+    """Add columns introduced after a database was first created."""
+    existing = {row["name"] for row in connection.execute("PRAGMA table_info(simulations)")}
+    added: list[str] = []
+    for name, kind in TABLE_COLUMNS:
+        if name in existing:
+            continue
+        base_type = kind.split()[0]
+        connection.execute(f"ALTER TABLE simulations ADD COLUMN {name} {base_type}")
+        added.append(name)
+    connection.commit()
+    return added
+
+
+def backfill_submittable(connection: sqlite3.Connection) -> int:
+    """Recompute the derived columns for rows written before they existed."""
+    rows = connection.execute(
+        "SELECT sim_uid, is_checks_json FROM simulations WHERE submittable IS NULL"
+    ).fetchall()
+    updated = 0
+    for row in rows:
+        checks = _load_json_list(row["is_checks_json"])
+        if not checks:
+            continue
+        alpha = {"is": {"checks": checks}}
+        submittable, blockers = derive_submittable(alpha)
+        connection.execute(
+            "UPDATE simulations SET submittable = ?, submit_blockers = ? WHERE sim_uid = ?",
+            (submittable, blockers, row["sim_uid"]),
+        )
+        updated += 1
+    connection.commit()
+    return updated
 
 
 # --------------------------------------------------------------------- writes
@@ -185,6 +257,7 @@ def build_row(
     alpha_body: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build the complete single-table row for one backtest."""
+    submittable, blockers = derive_submittable(alpha_body)
     row: dict[str, Any] = {
         "sim_uid": sim_uid,
         "expression": expression,
@@ -205,6 +278,8 @@ def build_row(
         "alpha_id": alpha_id,
         "status": status,
         "has_error": 0 if status in ("completed", "running") else 1,
+        "submittable": submittable,
+        "submit_blockers": blockers,
         "error": error,
         "submitted_at": submitted_at,
         "finished_at": finished_at,
@@ -360,6 +435,16 @@ def _load_json(value: str | None) -> dict[str, Any]:
     return parsed if isinstance(parsed, dict) else {}
 
 
+def _load_json_list(value: str | None) -> list[dict[str, Any]]:
+    if not value:
+        return []
+    try:
+        parsed = json.loads(value)
+    except ValueError:
+        return []
+    return [item for item in parsed if isinstance(item, dict)] if isinstance(parsed, list) else []
+
+
 def _dump(value: Any) -> str | None:
     if value is None:
         return None
@@ -392,6 +477,7 @@ SUMMARY_COLUMNS = (
     "decay",
     "status",
     "has_error",
+    "submittable",
     "is_sharpe",
     "is_fitness",
     "os_sharpe",

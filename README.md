@@ -198,6 +198,7 @@ uv run python -m worldquant_consultant_project.simulation --expression "rank(ts_
 |---|---|
 | 身份与参数 | `sim_uid`（主键）、`expression`、`language`、`instrument_type`、`region`、`universe`、`delay`、`decay`、`neutralization`、`truncation`、`pasteurization`、`unit_handling`、`nan_handling`、`settings_json`、`settings_hash` |
 | 结果标识 | `braint_sim_id`、`alpha_id`、`status`（`completed`/`failed`）、**`has_error`**（0/1）、`error` |
+| 可提交性 | **`submittable`**（1 可提交 / 0 被检查项卡住 / NULL 无检查数据）、**`submit_blockers`**（卡住的检查项 JSON） |
 | 时间与追溯 | `submitted_at`、`finished_at`、`duration_seconds`、`raw_simulation_json`、`raw_alpha_json` |
 | 样本指标 | `<sample>_*`，`sample ∈ is / os / train / test / prod`，每个样本 19 列（见下） |
 
@@ -216,6 +217,21 @@ uv run python -m worldquant_consultant_project.simulation --expression "rank(ts_
 未提交的 alpha 没有样本外数据，此时 `os_*` / `train_*` / `test_*` / `prod_*` 为 `NULL`。
 旧版四表结构（`simulation_results` / `simulation_metrics` / `simulation_checks`）会在
 首次连接时自动迁移进单表并删除，无需手工处理。
+
+### 关于「是否可提交」
+
+BRAIN 的 `/alphas/{id}` 响应里**没有**「能否提交」字段，只有 `status`（`UNSUBMITTED` 等）、
+`stage`、`grade` 与 `is.checks[]`。提交资格由检查项决定，因此库里用两列派生：
+
+- `submittable = 1`：`is.checks` 全部 `PASS`
+- `submittable = 0`：存在 `FAIL` 或 `PENDING`（`SELF_CORRELATION` 未算完也算卡住）
+- `submittable = NULL`：没有检查数据（模拟失败）
+
+`submit_blockers` 例：
+`[{"name":"LOW_SHARPE","result":"FAIL","value":0.3,"limit":1.25},{"name":"SELF_CORRELATION","result":"PENDING","value":null,"limit":null}]`
+
+两张历史列（`is_checks_passed/failed/pending`）保留，可直接用 SQL 复核：
+`WHERE submittable = 1` 即所有达标因子。
 
 BRAIN 的轮询约定是「响应带 `Retry-After` 头即未完成」，客户端据此等待并兼容
 `{"progress": 0.x}` 的进度体。

@@ -35,6 +35,8 @@ class SimulationOutcome:
     duration_seconds: float | None = None
     metrics: dict[str, dict[str, Any]] = field(default_factory=dict)
     settings: dict[str, Any] = field(default_factory=dict)
+    submittable: int | None = None
+    submit_blockers: list[dict[str, Any]] = field(default_factory=list)
 
     @property
     def ok(self) -> bool:
@@ -129,6 +131,8 @@ def run_simulation(
         outcome.alpha_id = str(alpha_id)
         alpha_body = client.get_alpha(outcome.alpha_id)
         outcome.metrics = _extract_metrics(alpha_body)
+        outcome.submittable, blockers = storage.derive_submittable(alpha_body)
+        outcome.submit_blockers = json.loads(blockers) if blockers else []
         outcome.status = "completed"
     except BrainSimulationError as exc:
         outcome.error = getattr(exc, "detail", None) or str(exc)

@@ -99,6 +99,8 @@ def print_outcome(outcome) -> None:
         keys = ("sharpe", "fitness", "returns", "turnover", "drawdown", "margin")
         summary = ", ".join(f"{key}={metrics.get(key)}" for key in keys if key in metrics)
         print(f"in-sample   : {summary}")
+    if outcome.submittable is not None:
+        print(f"submittable : {outcome.submittable}" + (f" (blockers: {len(outcome.submit_blockers or [])})" if outcome.submit_blockers else ""))
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -143,9 +145,11 @@ def main(argv: list[str] | None = None) -> int:
             print("recent runs:")
             for row in rows:
                 flag = "error" if row["has_error"] else "ok"
+                submittable = "-" if row["submittable"] is None else row["submittable"]
                 print(
                     f"  {row['submitted_at']}  {row['status']:<9} [{flag}] "
-                    f"sharpe={row['is_sharpe']}  fitness={row['is_fitness']}  "
+                    f"submittable={submittable}  sharpe={row['is_sharpe']}  "
+                    f"fitness={row['is_fitness']}  "
                     f"{row['universe']}/d{row['delay']}/decay{row['decay']}"
                 )
     finally:
