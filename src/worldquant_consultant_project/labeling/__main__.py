@@ -18,14 +18,17 @@ from .config import (
     DEFAULT_CREDENTIALS_PATH,
     DEFAULT_DB_PATH,
     DEFAULT_LOG_DIR,
-    DEFAULT_MODEL,
     DEFAULT_PROMPT_PATH,
-    LABEL_COLUMNS,
+    DEFAULT_PROVIDER,
+    PROVIDERS,
     LabelingConfigError,
+    ProviderSpec,
+    get_provider,
     load_api_key,
     load_system_prompt,
     prompt_fingerprint,
 )
+from .gemini_client import GeminiClient
 from .label import LabelConfig, preview_prompt, run_labeling
 
 logger = logging.getLogger("labeling")
@@ -33,6 +36,8 @@ logger = logging.getLogger("labeling")
 EXIT_OK = 0
 EXIT_CONFIG = 2
 EXIT_PARTIAL = 3
+
+CLIENTS = {"deepseek": DeepSeekClient, "gemini": GeminiClient}
 
 
 def _csv(value: str | None) -> list[str] | None:
@@ -44,12 +49,18 @@ def _csv(value: str | None) -> list[str] | None:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="worldquant_consultant_project.labeling",
-        description="Label BRAIN data fields with a DeepSeek model and store the labels in brain.db.",
+        description="Label BRAIN data fields with a large language model and store the labels in brain.db.",
+    )
+    parser.add_argument(
+        "--provider",
+        default=DEFAULT_PROVIDER,
+        choices=sorted(PROVIDERS),
+        help=f"labeling backend (default {DEFAULT_PROVIDER})",
     )
     parser.add_argument("--db", type=Path, default=DEFAULT_DB_PATH, help=f"SQLite path (default {DEFAULT_DB_PATH})")
     parser.add_argument("--prompt", type=Path, default=DEFAULT_PROMPT_PATH, help="system prompt file")
     parser.add_argument("--credentials", type=Path, default=DEFAULT_CREDENTIALS_PATH, help="credentials JSON path")
-    parser.add_argument("--model", default=DEFAULT_MODEL, help=f"model name (default {DEFAULT_MODEL})")
+    parser.add_argument("--model", help="model name (default depends on --provider)")
     parser.add_argument("--dataset", help="comma separated dataset ids to restrict labeling")
     parser.add_argument("--limit", type=int, help="label at most N fields (smoke runs)")
     parser.add_argument("--workers", type=int, default=8, help="concurrent requests (default 8)")
@@ -84,32 +95,15 @@ def setup_logging(level: str, log_dir: Path) -> Path | None:
     return log_path
 
 
-def print_summary(connection) -> None:
-    rows = list(
-        connection.execute(
-            """
-            SELECT COUNT(*) AS fields,
-                   SUM(CASE WHEN deepseek_category IS NOT NULL THEN 1 ELSE 0 END) AS labeled
-            FROM (SELECT DISTINCT dataset_id, field_id, deepseek_category FROM data_fields)
-            """
-        )
-    )
-    if not rows:
-        return
-    row = rows[0]
-    print(f"labeled fields: {row['labeled']} / {row['fields']}")
-    for column in LABEL_COLUMNS.values():
-        print(f"  {column}")
-    print("distribution:")
-    for dimension, column in LABEL_COLUMNS.items():
-        counts = connection.execute(
-            f"SELECT {column} AS value, COUNT(*) AS n FROM ("
-            f" SELECT DISTINCT dataset_id, field_id, {column} FROM data_fields)"
-            f" WHERE {column} IS NOT NULL GROUP BY 1 ORDER BY n DESC"
-        ).fetchall()
-        if counts:
-            summary = ", ".join(f"{r['value']}={r['n']}" for r in counts)
-            print(f"  {dimension:<15} {summary}")
+def print_summary(connection, spec: ProviderSpec) -> None:
+    summary = storage.label_summary(connection, spec)
+    print(f"[{spec.name}] labeled fields: {summary['labeled']} / {summary['fields']}")
+    print("  columns: " + ", ".join(spec.columns.values()))
+    print("  distribution:")
+    for dimension, entries in summary["distributions"].items():
+        if entries:
+            text = ", ".join(f"{value}={count}" for value, count in entries)
+            print(f"    {dimension:<15} {text}")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -117,6 +111,13 @@ def main(argv: list[str] | None = None) -> int:
     log_path = setup_logging(args.log_level, args.log_dir)
     if log_path:
         logger.info("logging to %s", log_path)
+
+    try:
+        spec = get_provider(args.provider)
+    except LabelingConfigError as exc:
+        logger.error("%s", exc)
+        return EXIT_CONFIG
+    model = args.model or spec.default_model
 
     try:
         system_prompt = load_system_prompt(args.prompt)
@@ -132,27 +133,30 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT_CONFIG
 
     try:
-        added = storage.ensure_schema(connection)
+        added = storage.ensure_schema(connection, spec)
         if added:
             logger.info("added columns: %s", ", ".join(added))
 
         config = LabelConfig(
-            model=args.model,
+            model=model,
             prompt_sha=prompt_sha,
             workers=args.workers,
             thinking=args.thinking,
+            provider=spec,
         )
         fields = storage.load_fields(
             connection,
-            model=args.model,
+            model=model,
             prompt_sha=prompt_sha,
+            provider=spec,
             dataset_filter=_csv(args.dataset),
             limit=args.limit,
             force=args.force,
         )
         logger.info(
-            "model=%s workers=%d thinking=%s pending=%d prompt_sha=%s",
-            args.model,
+            "provider=%s model=%s workers=%d thinking=%s pending=%d prompt_sha=%s",
+            spec.name,
+            model,
             args.workers,
             args.thinking,
             len(fields),
@@ -164,6 +168,8 @@ def main(argv: list[str] | None = None) -> int:
             if not preview:
                 print("nothing pending")
                 return EXIT_OK
+            print(f"provider: {spec.name} ({model})")
+            print(f"columns: {', '.join(spec.columns.values())}")
             print(f"field: {preview['field']}")
             print(f"pending fields: {preview['pending']}")
             print("--- user prompt ---")
@@ -172,16 +178,17 @@ def main(argv: list[str] | None = None) -> int:
 
         if not fields:
             print("nothing pending")
-            print_summary(connection)
+            print_summary(connection, spec)
             return EXIT_OK
 
         try:
-            api_key = load_api_key(args.credentials)
+            api_key = load_api_key(args.credentials, spec.name)
         except LabelingConfigError as exc:
             logger.error("%s", exc)
             return EXIT_CONFIG
 
-        with DeepSeekClient(api_key) as client:
+        client_factory = CLIENTS[spec.name]
+        with client_factory(api_key) as client:
             stats = run_labeling(
                 client,
                 connection,
@@ -191,7 +198,7 @@ def main(argv: list[str] | None = None) -> int:
                 show_progress=sys.stderr.isatty(),
             )
         if args.limit is None:
-            print_summary(connection)
+            print_summary(connection, spec)
     finally:
         connection.close()
 

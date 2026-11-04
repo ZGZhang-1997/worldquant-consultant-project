@@ -14,14 +14,19 @@ from typing import Any, Iterable, Sequence
 from tqdm import tqdm
 
 from . import storage
-from .client import DeepSeekClient, DeepSeekError
-from .config import LABEL_DIMENSIONS, FieldInput
+from .client import DeepSeekError
+from .config import DEFAULT_PROVIDER, LABEL_DIMENSIONS, FieldInput, ProviderSpec, get_provider
+from .gemini_client import GeminiError
 from .prompt import build_retry_prompt, build_user_prompt
 
 logger = logging.getLogger(__name__)
 
 MAX_VALIDATION_RETRIES = 1
 MAX_INVALID_RAW_CHARS = 2000
+
+# Both provider clients expose the same ``complete`` signature; any of these errors
+# means the request itself failed (as opposed to the output being invalid).
+ClientError = (DeepSeekError, GeminiError)
 
 
 @dataclass
@@ -31,6 +36,11 @@ class LabelConfig:
     workers: int = 8
     thinking: bool = False
     batch_size: int = 50
+    provider: str | ProviderSpec = DEFAULT_PROVIDER
+
+    @property
+    def spec(self) -> ProviderSpec:
+        return self.provider if isinstance(self.provider, ProviderSpec) else get_provider(self.provider)
 
 
 @dataclass
@@ -79,7 +89,7 @@ def parse_labels(content: str) -> dict[str, str]:
 
 
 def label_field(
-    client: DeepSeekClient,
+    client: Any,
     field: FieldInput,
     *,
     system_prompt: str,
@@ -112,7 +122,7 @@ def label_field(
                 user_prompt=prompt,
                 thinking=config.thinking,
             )
-        except DeepSeekError as exc:
+        except ClientError as exc:
             record["status"] = "error"
             record["error"] = str(exc)[:1000]
             return record
@@ -141,7 +151,7 @@ def label_field(
 
 
 def run_labeling(
-    client: DeepSeekClient,
+    client: Any,
     connection: sqlite3.Connection,
     fields: Sequence[FieldInput],
     *,
@@ -201,6 +211,7 @@ def run_labeling(
                     model=config.model,
                     prompt_sha=config.prompt_sha,
                     results=buffer,
+                    provider=config.spec,
                 )
                 buffer.clear()
             progress.update(1)
@@ -211,7 +222,11 @@ def run_labeling(
 
     if buffer:
         stats.rows_updated += storage.write_labels(
-            connection, model=config.model, prompt_sha=config.prompt_sha, results=buffer
+            connection,
+            model=config.model,
+            prompt_sha=config.prompt_sha,
+            results=buffer,
+            provider=config.spec,
         )
     return stats
 

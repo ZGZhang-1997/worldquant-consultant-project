@@ -93,12 +93,19 @@ uv run python -m worldquant_consultant_project.acquisition `
 `data_fields` 的主键为 `(instrument_type, region, delay, universe, dataset_id, field_id)`，
 重复运行以 upsert 写入，不会产生重复行。
 
-## 字段打标签（DeepSeek → brain.db）
+## 字段打标签（DeepSeek / Gemini → brain.db）
 
 子包：[`src/worldquant_consultant_project/labeling/`](./src/worldquant_consultant_project/labeling/)
-读取 `credentials.json` 的 `deepseek_api_key`（也可用环境变量 `DEEPSEEK_API_KEY` 覆盖），
-系统提示词来自 [`system_prompt.txt`](./system_prompt.txt)，模型默认 `deepseek-flash`
-（关闭思考模式 + JSON 输出）。
+同一份 [`system_prompt.txt`](./system_prompt.txt)、同一套用户提示词格式与校验/重试/续跑逻辑，
+通过 `--provider` 切换后端：
+
+| provider | 默认模型 | 凭证字段 | 写入列前缀 | 审计表 | 视图 |
+|---|---|---|---|---|---|
+| `deepseek`（默认） | `deepseek-flash` | `deepseek_api_key` | `deepseek_` | `deepseek_labels` | `v_deepseek_field_labels` |
+| `gemini` | `gemini-3.8-flash` | `gemini_api_key` | `gemini_` | `gemini_labels` | `v_gemini_field_labels` |
+
+凭证也可用环境变量 `DEEPSEEK_API_KEY` / `GEMINI_API_KEY` 覆盖；两个后端均关闭思考模式并使用
+JSON 结构化输出（Gemini 额外使用 `responseSchema` 约束枚举）。
 
 ### 运行
 
@@ -111,16 +118,20 @@ uv run python -m worldquant_consultant_project.labeling --limit 20
 
 # 全量（断点续跑，已成功的字段自动跳过）
 uv run python -m worldquant_consultant_project.labeling
+
+# 切换到 Gemini
+uv run python -m worldquant_consultant_project.labeling --provider gemini
 ```
 
 ### 参数
 
 | 参数 | 说明 |
 |---|---|
+| `--provider deepseek\|gemini` | 打标签后端，默认 `deepseek` |
 | `--limit 20` | 只处理 N 个字段（冒烟） |
 | `--dataset fundamental6,pv1` | 只处理指定数据集 |
 | `--workers 8` | 并发线程数（默认 8） |
-| `--model deepseek-flash` | 模型名，换模型时标签写入独立的列前缀需另行扩展 |
+| `--model` | 省略时取该 provider 的默认模型 |
 | `--thinking` | 启用思考模式（默认关闭，分类任务无需） |
 | `--force` | 忽略已成功的记录，强制重新打标签 |
 | `--dry-run` | 打印首条 user prompt 与待处理数，不调用 API |
@@ -132,10 +143,11 @@ uv run python -m worldquant_consultant_project.labeling
 
 - 按 `(dataset_id, field_id)` 去重后调用模型（4,367 次而非 26,202 次），结果一次 `UPDATE`
   回填该字段在 6 个 universe 下的所有行
-- `data_fields` 末尾新增 5 列（值均限定在 `system_prompt.txt` 的枚举内）：
-  `deepseek_category`、`deepseek_math_dimension`、`deepseek_polarity`、
-  `deepseek_domain_support`、`deepseek_frequency`
-- 审计表 `deepseek_labels`（主键 `model + dataset_id + field_id`）记录原始响应、
+- `data_fields` 末尾按 provider 追加 5 列（值均限定在 `system_prompt.txt` 的枚举内）：
+  `<provider>_category`、`<provider>_math_dimension`、`<provider>_polarity`、
+  `<provider>_domain_support`、`<provider>_frequency`
+  （当前已有 `deepseek_*` 与 `gemini_*` 两套，可并存对比）
+- 审计表 `<provider>_labels`（主键 `model + dataset_id + field_id`）记录原始响应、
   token 用量、重试次数、状态（`ok` / `invalid` / `error`）与提示词 sha256
-- 视图 `v_deepseek_field_labels`：已打标签字段的扁平视图，便于下游取用
+- 视图 `v_<provider>_field_labels`：已打标签字段的扁平视图，便于下游取用
 
