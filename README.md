@@ -151,3 +151,55 @@ uv run python -m worldquant_consultant_project.labeling --provider gemini
   token 用量、重试次数、状态（`ok` / `invalid` / `error`）与提示词 sha256
 - 视图 `v_<provider>_field_labels`：已打标签字段的扁平视图，便于下游取用
 
+## 因子回测（Fast Expression → simulations.db）
+
+子包：[`src/worldquant_consultant_project/simulation/`](./src/worldquant_consultant_project/simulation/)
+把 Fast Expression 因子提交到 BRAIN 模拟接口，轮询完成后取 `/alphas/{id}` 指标，
+写入独立数据库 `data/simulations.db`（与 `brain.db` 分开）。
+
+### 作为函数调用
+
+```python
+from worldquant_consultant_project.simulation import SimulationSettings, run_simulation
+
+outcome = run_simulation(
+    "rank(ts_delta(close, 5))",
+    settings=SimulationSettings(decay=4, universe="TOP1000"),  # 省略则用默认参数
+    db_path="data/simulations.db",                              # 省略则用默认路径
+)
+outcome.status      # completed / failed
+outcome.alpha_id
+outcome.metrics["is"]["sharpe"]
+```
+
+无论成功、表达式错误还是超时，都会写入一条记录（失败记录带 `error`），不会抛未捕获异常。
+
+### 命令行
+
+```powershell
+uv run python -m worldquant_consultant_project.simulation --expression "rank(ts_delta(close, 5))" --decay 4
+```
+
+| 参数 | 说明 |
+|---|---|
+| `--expression` | 必填，Fast Expression 字符串 |
+| `--region` / `--universe` / `--delay` | 默认 `USA` / `TOP3000` / `1` |
+| `--decay` / `--neutralization` / `--truncation` | 默认 `0` / `SUBINDUSTRY` / `0.08` |
+| `--instrument-type` | 默认 `EQUITY` |
+| `--db` / `--timeout` / `--credentials` / `--log-dir` | 路径与轮询超时（默认 900s） |
+
+退出码：`0` 回测完成；`2` 凭证/鉴权失败；`3` 模拟失败（表达式错误、超时等，记录仍入库）。
+
+### 库表结构（`data/simulations.db`）
+
+| 表 / 视图 | 内容 |
+|---|---|
+| `simulations` | 每次回测一行：表达式、全部参数（`settings_json` + 拆列）、`settings_hash`、`braint_sim_id`、`alpha_id`、状态、错误、耗时、原始响应 |
+| `simulation_results` | 每 `(sim, sample)` 一行宽表：`is`/`os`/`train`/`test`/`prod` 的 `sharpe`、`fitness`、`returns`、`turnover`、`drawdown`、`margin`、`pnl`、`book_size`、`long/short_count`、相关性、`checks_passed/failed/pending` |
+| `simulation_metrics` | 每个指标一行（键值长表），保证漏掉的字段也能完整追溯 |
+| `simulation_checks` | 每项检查一行：`name`、`result`、`value`、`limit`、`year`、`message` |
+| `v_simulation_summary` | 表达式 + 参数 + IS/OS 核心指标一览 |
+
+BRAIN 的轮询约定是「响应带 `Retry-After` 头即未完成」，客户端据此等待并兼容
+`{"progress": 0.x}` 的进度体。
+
