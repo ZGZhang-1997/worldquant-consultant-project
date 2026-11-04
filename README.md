@@ -192,13 +192,30 @@ uv run python -m worldquant_consultant_project.simulation --expression "rank(ts_
 
 ### 库表结构（`data/simulations.db`）
 
-| 表 / 视图 | 内容 |
+只有**一张表** `simulations`，一行一次回测，共 120 列：
+
+| 列组 | 内容 |
 |---|---|
-| `simulations` | 每次回测一行：表达式、全部参数（`settings_json` + 拆列）、`settings_hash`、`braint_sim_id`、`alpha_id`、状态、错误、耗时、原始响应 |
-| `simulation_results` | 每 `(sim, sample)` 一行宽表：`is`/`os`/`train`/`test`/`prod` 的 `sharpe`、`fitness`、`returns`、`turnover`、`drawdown`、`margin`、`pnl`、`book_size`、`long/short_count`、相关性、`checks_passed/failed/pending` |
-| `simulation_metrics` | 每个指标一行（键值长表），保证漏掉的字段也能完整追溯 |
-| `simulation_checks` | 每项检查一行：`name`、`result`、`value`、`limit`、`year`、`message` |
-| `v_simulation_summary` | 表达式 + 参数 + IS/OS 核心指标一览 |
+| 身份与参数 | `sim_uid`（主键）、`expression`、`language`、`instrument_type`、`region`、`universe`、`delay`、`decay`、`neutralization`、`truncation`、`pasteurization`、`unit_handling`、`nan_handling`、`settings_json`、`settings_hash` |
+| 结果标识 | `braint_sim_id`、`alpha_id`、`status`（`completed`/`failed`）、**`has_error`**（0/1）、`error` |
+| 时间与追溯 | `submitted_at`、`finished_at`、`duration_seconds`、`raw_simulation_json`、`raw_alpha_json` |
+| 样本指标 | `<sample>_*`，`sample ∈ is / os / train / test / prod`，每个样本 19 列（见下） |
+
+每个样本的 19 列：
+
+| 列 | 含义 |
+|---|---|
+| `<sample>_sharpe` / `_fitness` / `_returns` / `_turnover` / `_drawdown` / `_margin` / `_pnl` | 核心指标 |
+| `<sample>_book_size` / `_long_count` / `_short_count` | 账簿规模与多空数量 |
+| `<sample>_self_correlation` / `_prod_correlation` | 自相关 / 生产相关 |
+| `<sample>_start_date` / `_drawdown_start_date` | 起始日与回撤起始日 |
+| `<sample>_checks_passed` / `_checks_failed` / `_checks_pending` | 检查项通过 / 失败 / 待定计数 |
+| `<sample>_checks_json` | 检查明细 JSON（`name`、`result`、`value`、`limit`、`year`、`message`） |
+| `<sample>_metrics_json` | 未展开指标的兜底 JSON |
+
+未提交的 alpha 没有样本外数据，此时 `os_*` / `train_*` / `test_*` / `prod_*` 为 `NULL`。
+旧版四表结构（`simulation_results` / `simulation_metrics` / `simulation_checks`）会在
+首次连接时自动迁移进单表并删除，无需手工处理。
 
 BRAIN 的轮询约定是「响应带 `Retry-After` 头即未完成」，客户端据此等待并兼容
 `{"progress": 0.x}` 的进度体。

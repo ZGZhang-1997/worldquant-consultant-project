@@ -52,8 +52,8 @@ def settings_fingerprint(expression: str, settings: SimulationSettings) -> str:
 
 def _extract_metrics(alpha: dict[str, Any]) -> dict[str, dict[str, Any]]:
     metrics: dict[str, dict[str, Any]] = {}
-    for sample, key in storage.SAMPLES:
-        block = alpha.get(key)
+    for sample in storage.SAMPLES:
+        block = alpha.get(sample)
         if isinstance(block, dict):
             metrics[sample] = {
                 name: value

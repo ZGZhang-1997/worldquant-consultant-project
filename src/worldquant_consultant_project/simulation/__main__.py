@@ -142,8 +142,9 @@ def main(argv: list[str] | None = None) -> int:
         if rows:
             print("recent runs:")
             for row in rows:
+                flag = "error" if row["has_error"] else "ok"
                 print(
-                    f"  {row['submitted_at']}  {row['status']:<9} "
+                    f"  {row['submitted_at']}  {row['status']:<9} [{flag}] "
                     f"sharpe={row['is_sharpe']}  fitness={row['is_fitness']}  "
                     f"{row['universe']}/d{row['delay']}/decay{row['decay']}"
                 )
