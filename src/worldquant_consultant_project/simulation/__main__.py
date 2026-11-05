@@ -146,7 +146,7 @@ def main(argv: list[str] | None = None) -> int:
             for row in rows:
                 state = "done" if row["completed"] else "failed"
                 print(
-                    f"  {row['submitted_at']}  {state:<6} sharpe={row['is_sharpe']}  "
+                    f"  {row['simulated_at']}  {state:<6} sharpe={row['is_sharpe']}  "
                     f"fitness={row['is_fitness']}  turnover={row['is_turnover']}  "
                     f"alpha={row['alpha_id']}  {row['duration_seconds']}s"
                 )

@@ -41,7 +41,7 @@ MAIN_COLUMNS: tuple[str, ...] = (
     "expression",
     "settings_json",
     "completed",
-    "submitted_at",
+    "simulated_at",
     "duration_seconds",
 ) + tuple(column for column, _, _ in IS_METRICS)
 
@@ -66,12 +66,12 @@ CREATE TABLE IF NOT EXISTS simulations (
     expression       TEXT NOT NULL,
     settings_json    TEXT NOT NULL,
     completed        INTEGER NOT NULL DEFAULT 0,
-    submitted_at     TEXT NOT NULL,
+    simulated_at     TEXT NOT NULL,
     duration_seconds REAL,
     {metric_columns}
 );
 
-CREATE INDEX IF NOT EXISTS idx_simulations_submitted ON simulations (submitted_at);
+CREATE INDEX IF NOT EXISTS idx_simulations_simulated ON simulations (simulated_at);
 
 CREATE TABLE IF NOT EXISTS simulation_details (
     sim_uid             TEXT PRIMARY KEY,
@@ -94,7 +94,7 @@ CREATE VIEW v_simulation_summary AS
 SELECT s.sim_uid,
        s.expression,
        s.completed,
-       s.submitted_at,
+       s.simulated_at,
        s.duration_seconds,
        s.is_sharpe,
        s.is_fitness,
@@ -102,7 +102,7 @@ SELECT s.sim_uid,
        d.alpha_id
 FROM simulations AS s
 LEFT JOIN simulation_details AS d ON d.sim_uid = s.sim_uid
-ORDER BY s.submitted_at DESC;
+ORDER BY s.simulated_at DESC;
 """
 
 
@@ -126,6 +126,18 @@ def _needs_rebuild(connection: sqlite3.Connection) -> bool:
     return bool(columns) and "completed" not in columns
 
 
+def _rename_legacy_timestamp(connection: sqlite3.Connection) -> bool:
+    """Rename ``submitted_at`` to ``simulated_at``: the timestamp marks the run start."""
+    columns = {row["name"] for row in connection.execute("PRAGMA table_info(simulations)")}
+    if "submitted_at" not in columns or "simulated_at" in columns:
+        return False
+    connection.execute("DROP VIEW IF EXISTS v_simulation_summary")
+    connection.execute("ALTER TABLE simulations RENAME COLUMN submitted_at TO simulated_at")
+    connection.execute("DROP INDEX IF EXISTS idx_simulations_submitted")
+    connection.commit()
+    return True
+
+
 def connect(path: Path | str) -> sqlite3.Connection:
     db_path = Path(path)
     db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -143,6 +155,7 @@ def connect(path: Path | str) -> sqlite3.Connection:
             "DROP TABLE IF EXISTS simulation_metrics;"
             "DROP TABLE IF EXISTS simulation_checks;"
         )
+    _rename_legacy_timestamp(connection)
     connection.executescript(_BASE_SCHEMA.format(metric_columns=_metric_column_sql()))
     connection.commit()
     return connection
@@ -221,7 +234,7 @@ def build_rows(
     expression: str,
     settings: Mapping[str, Any],
     completed: bool,
-    submitted_at: str,
+    simulated_at: str,
     duration_seconds: float | None = None,
     alpha_id: str | None = None,
     braint_sim_id: str | None = None,
@@ -237,7 +250,7 @@ def build_rows(
         "expression": expression,
         "settings_json": json.dumps(settings, ensure_ascii=False, sort_keys=True),
         "completed": 1 if completed else 0,
-        "submitted_at": submitted_at,
+        "simulated_at": simulated_at,
         "duration_seconds": duration_seconds,
     }
     for column, source, _ in IS_METRICS:
@@ -308,7 +321,7 @@ def summary_columns(connection: sqlite3.Connection) -> list[str]:
         "sim_uid",
         "expression",
         "completed",
-        "submitted_at",
+        "simulated_at",
         "duration_seconds",
         "is_sharpe",
         "is_fitness",

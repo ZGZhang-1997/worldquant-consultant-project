@@ -79,7 +79,7 @@ def run_simulation(
     )
 
     sim_uid = uuid.uuid4().hex
-    submitted_at = storage.utc_now()
+    simulated_at = storage.utc_now()
     started = time.monotonic()
 
     connection = storage.connect(db_path or DEFAULT_DB_PATH)
@@ -106,7 +106,7 @@ def run_simulation(
             expression=expression,
             settings=resolved.stored,
             completed=False,
-            submitted_at=submitted_at,
+            simulated_at=simulated_at,
             braint_sim_id=outcome.braint_sim_id,
         )
         simulation_body = client.poll(location, timeout=timeout)
@@ -139,7 +139,7 @@ def run_simulation(
             expression=expression,
             settings=resolved.stored,
             completed=outcome.ok,
-            submitted_at=submitted_at,
+            simulated_at=simulated_at,
             duration_seconds=outcome.duration_seconds,
             braint_sim_id=outcome.braint_sim_id,
             alpha_id=outcome.alpha_id,

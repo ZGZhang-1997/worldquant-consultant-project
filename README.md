@@ -202,7 +202,7 @@ uv run python -m worldquant_consultant_project.simulation --expression "rank(ts_
 | `expression` | 因子表达式 |
 | `settings_json` | 回测设置整包 JSON（universe / delay / decay / neutralization / truncation … 不再拆列） |
 | `completed` | 是否跑完（1/0） |
-| `submitted_at` | 回测提交时间 |
+| `simulated_at` | 回测开始运行的时间（不是提交 alpha 的时间） |
 | `duration_seconds` | 回测耗时 |
 | `is_sharpe`、`is_fitness`、`is_returns`、`is_turnover`、`is_drawdown`、`is_margin`、`is_pnl`、`is_book_size`、`is_long_count`、`is_short_count`、`is_start_date` | 样本内（IS）全部指标，每项一列 |
 | `check_<检查名>` | 提交检查逐项一列，取值为 `PASS` / `FAIL` / `PENDING`（如 `check_low_sharpe`、`check_self_correlation`）；**首次遇到新检查项会自动加列** |
