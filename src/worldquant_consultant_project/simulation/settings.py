@@ -1,9 +1,14 @@
-"""Simulation settings: defaults, validation and API payload rendering."""
+"""Simulation settings: defaults, validation, config-file loading and API payload rendering."""
 
 from __future__ import annotations
 
+import json
 from dataclasses import asdict, dataclass, field, fields
+from pathlib import Path
 from typing import Any
+
+DEFAULT_SETTINGS_PATH = Path(__file__).with_name("simulation_setting.json")
+DEFAULT_CONCURRENCY_PATH = Path(__file__).with_name("maximum_concurrent_number")
 
 # BRAIN's usual defaults for a single REGULAR fast-expression simulation.
 DEFAULT_SETTINGS: dict[str, Any] = {
@@ -20,6 +25,19 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "language": "FASTEXPR",
     "visualization": False,
 }
+
+# BRAIN sends camelCase keys; the dataclass uses snake_case.
+CAMEL_TO_FIELD = {
+    "instrumentType": "instrument_type",
+    "unitHandling": "unit_handling",
+    "nanHandling": "nan_handling",
+}
+
+SUPPORTED_SIMULATION_TYPE = "REGULAR"
+
+
+class SettingsFileError(RuntimeError):
+    """The settings or concurrency file is missing or malformed."""
 
 
 @dataclass
@@ -99,3 +117,46 @@ class SimulationSettings:
         extra_field = values.get("extra") or {}
         kwargs["extra"] = {**extras, **extra_field}
         return cls(**kwargs)
+
+
+def load_settings_file(path: Path | str | None = None) -> tuple[str, SimulationSettings]:
+    """Read ``simulation_setting.json`` and return ``(simulation_type, settings)``."""
+    settings_path = Path(path) if path else DEFAULT_SETTINGS_PATH
+    if not settings_path.is_file():
+        raise SettingsFileError(f"settings file not found: {settings_path}")
+    try:
+        payload = json.loads(settings_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SettingsFileError(f"cannot read settings file {settings_path}: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise SettingsFileError(f"{settings_path} must contain a JSON object")
+
+    sim_type = str(payload.get("type") or SUPPORTED_SIMULATION_TYPE).upper()
+    if sim_type != SUPPORTED_SIMULATION_TYPE:
+        raise SettingsFileError(
+            f"only {SUPPORTED_SIMULATION_TYPE} simulations are supported, got '{sim_type}'"
+        )
+    block = payload.get("settings")
+    if not isinstance(block, dict) or not block:
+        raise SettingsFileError(f"{settings_path} must contain a non-empty 'settings' object")
+
+    values = {CAMEL_TO_FIELD.get(key, key): value for key, value in block.items()}
+    try:
+        return sim_type, SimulationSettings.from_dict(values)
+    except ValueError as exc:
+        raise SettingsFileError(f"invalid settings in {settings_path}: {exc}") from exc
+
+
+def load_max_concurrency(path: Path | str | None = None) -> int:
+    """Read the platform's simultaneous-simulation allowance."""
+    concurrency_path = Path(path) if path else DEFAULT_CONCURRENCY_PATH
+    if not concurrency_path.is_file():
+        raise SettingsFileError(f"concurrency file not found: {concurrency_path}")
+    try:
+        raw = concurrency_path.read_text(encoding="utf-8").strip()
+        value = int(raw.split()[0]) if raw else 0
+    except (OSError, ValueError, IndexError) as exc:
+        raise SettingsFileError(f"cannot parse {concurrency_path}: {exc}") from exc
+    if value < 1:
+        raise SettingsFileError(f"{concurrency_path} must contain a positive integer, got {raw!r}")
+    return value

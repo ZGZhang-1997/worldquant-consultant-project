@@ -190,6 +190,32 @@ uv run python -m worldquant_consultant_project.simulation --expression "rank(ts_
 
 退出码：`0` 回测完成；`2` 凭证/鉴权失败；`3` 模拟失败（表达式错误、超时等，记录仍入库）。
 
+### 批量回测（alpha.db 未回测因子 → 多线程并发）
+
+```powershell
+uv run python -m worldquant_consultant_project.simulation.batch --dry-run   # 先看待回测数量
+uv run python -m worldquant_consultant_project.simulation.batch             # 全量并发回测
+uv run python -m worldquant_consultant_project.simulation.batch --limit 20  # 只跑 20 个
+```
+
+- **取数**：从 `data/alpha.db` 的 `alphas` 表读取 `simulated IS NULL` 的因子（按 `alpha_uid` 排序）
+- **并发**：线程池大小取自 [`maximum_concurrent_number`](./src/worldquant_consultant_project/simulation/maximum_concurrent_number)（当前 `3`，即账号允许的同时回测数），`--workers` 可临时覆盖
+- **参数**：取自 [`simulation_setting.json`](./src/worldquant_consultant_project/simulation/simulation_setting.json)（`type` + `settings`），每个线程独立登录并复用会话
+- **写回**：回测完成（无论成功或平台报错）后把 `alphas.simulated` 置 1、`simulated_at` 写入时间；本地崩溃（未真正提交）不标记，便于重试
+- **覆盖**：`simulations` 上建有 `(expression, settings_json)` 唯一索引，同一表达式 + 同一参数重跑会**覆盖原行并保留原 `sim_uid`**，不会新增重复记录
+- **限流**：提交遇到 429（超出并发额度）会按 `Retry-After` 等待后重试，不会让该因子失败
+
+| 参数 | 说明 |
+|---|---|
+| `--alpha-db` / `--db` | 默认 `data/alpha.db` / `data/simulations.db` |
+| `--settings` / `--concurrency-file` | 覆盖默认配置文件路径 |
+| `--workers N` | 覆盖并发数（默认读配置文件） |
+| `--limit N` | 只回测 N 个 |
+| `--timeout` / `--progress-every` | 单条轮询超时（默认 900s）/ 进度日志间隔 |
+| `--dry-run` | 只统计待回测数量 |
+
+退出码：`0` 全部成功；`2` 配置/鉴权失败；`3` 存在失败因子（失败记录已入库，可据此排查）。
+
 ### 库表结构（`data/simulations.db`）
 
 两张表（旧版宽表会在首次连接时自动丢弃重建）：
@@ -204,6 +230,8 @@ uv run python -m worldquant_consultant_project.simulation --expression "rank(ts_
 | `settings_json`                                                                                                                                                                      | 回测设置整包 JSON（universe / delay / decay / neutralization / truncation … 不再拆列）                                                                 |
 | `completed`                                                                                                                                                                          | 是否跑完（1/0）                                                                                                                                         |
 | `simulated_at`                                                                                                                                                                       | 回测开始运行的时间（不是提交 alpha 的时间）                                                                                                             |
+
+同一 `(expression, settings_json)` 只保留一行：重跑会覆盖结果（保留原 `sim_uid`）。
 | `duration_seconds`                                                                                                                                                                   | 回测耗时                                                                                                                                                |
 | `is_sharpe`、`is_fitness`、`is_returns`、`is_turnover`、`is_drawdown`、`is_margin`、`is_pnl`、`is_book_size`、`is_long_count`、`is_short_count`、`is_start_date` | 样本内（IS）全部指标，每项一列                                                                                                                          |
 | `check_<检查名>`                                                                                                                                                                     | 提交检查逐项一列，取值为 `PASS` / `FAIL` / `PENDING`（如 `check_low_sharpe`、`check_self_correlation`）；**首次遇到新检查项会自动加列** |

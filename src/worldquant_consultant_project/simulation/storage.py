@@ -104,6 +104,10 @@ CREATE TABLE IF NOT EXISTS schema_meta (
 CREATE INDEX IF NOT EXISTS idx_simulations_simulated ON simulations (simulated_at);
 CREATE INDEX IF NOT EXISTS idx_details_alpha ON simulation_details (alpha_id);
 
+-- Same expression with the same settings is one logical run: a re-run overwrites it.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_simulations_expression_settings
+    ON simulations (expression, settings_json);
+
 DROP VIEW IF EXISTS v_simulation_summary;
 CREATE VIEW v_simulation_summary AS
 SELECT s.sim_uid,
@@ -162,13 +166,21 @@ def _rename_legacy_timestamp(connection: sqlite3.Connection) -> bool:
     return True
 
 
-def connect(path: Path | str) -> sqlite3.Connection:
+def connect(path: Path | str, *, initialize: bool = True) -> sqlite3.Connection:
+    """Open the simulations database.
+
+    ``initialize=False`` skips the schema/migration work, which is what worker threads
+    want: the batch runner initialises once up front, then each worker opens cheaply.
+    """
     db_path = Path(path)
     db_path.parent.mkdir(parents=True, exist_ok=True)
-    connection = sqlite3.connect(str(db_path))
+    connection = sqlite3.connect(str(db_path), timeout=60.0)
     connection.row_factory = sqlite3.Row
     connection.execute("PRAGMA journal_mode = WAL")
+    connection.execute("PRAGMA busy_timeout = 60000")
     connection.execute("PRAGMA foreign_keys = ON")
+    if not initialize:
+        return connection
     if _needs_rebuild(connection):
         # The simplified layout starts empty: old wide tables are dropped on purpose.
         connection.executescript(
@@ -270,7 +282,12 @@ def ensure_check_columns(
         column = check_column(name)
         if column in existing:
             continue
-        connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} TEXT")
+        try:
+            connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} TEXT")
+        except sqlite3.OperationalError as exc:
+            # Another worker may have added the same column between our check and the ALTER.
+            if "duplicate column" not in str(exc).lower():
+                raise
         existing.add(column)
         added.append(column)
     if added:
@@ -382,7 +399,7 @@ def build_rows(
         "sim_uid": sim_uid,
         "expression": expression,
         TENTATIVE_COLUMN: tentative_submittable(checks),
-        "settings_json": json.dumps(settings, ensure_ascii=False, sort_keys=True),
+        "settings_json": settings_json(settings),
         "completed": 1 if completed else 0,
         "simulated_at": simulated_at,
         "duration_seconds": duration_seconds,
@@ -421,9 +438,34 @@ def build_rows(
     return main, details
 
 
+def settings_json(settings: Mapping[str, Any]) -> str:
+    """Canonical settings text: identical settings always produce identical JSON."""
+    return json.dumps(settings, ensure_ascii=False, sort_keys=True)
+
+
+def find_sim_uid(
+    connection: sqlite3.Connection, expression: str, settings_text: str
+) -> str | None:
+    """The uid of an existing run with the same expression and settings, if any."""
+    row = connection.execute(
+        "SELECT sim_uid FROM simulations WHERE expression = ? AND settings_json = ?",
+        (expression, settings_text),
+    ).fetchone()
+    return str(row[0]) if row else None
+
+
 def write_outcome(connection: sqlite3.Connection, **kwargs: Any) -> None:
-    """Insert or update one backtest (main row + side row), adding check columns as needed."""
+    """Insert or update one backtest (main row + side row), adding check columns as needed.
+
+    A row is identified by ``(expression, settings_json)``: re-running the same expression
+    with the same settings overwrites the previous result but keeps its ``sim_uid``.
+    """
     main, details = build_rows(**kwargs)
+    existing = find_sim_uid(connection, main["expression"], main["settings_json"])
+    if existing:
+        main["sim_uid"] = existing
+        details["sim_uid"] = existing
+
     new_checks = [column for column in main if column.startswith(CHECK_COLUMN_PREFIX)]
     ensure_check_columns(connection, [column[len(CHECK_COLUMN_PREFIX):] for column in new_checks])
 

@@ -62,12 +62,16 @@ def run_simulation(
     timeout: float = 900.0,
     credentials_path: Path | str | None = None,
     client: BrainSimulationClient | None = None,
+    initialize_db: bool = True,
 ) -> SimulationOutcome:
     """Backtest one Fast Expression factor and store the run in SQLite.
 
     Failures (invalid expression, timeout, platform error) are recorded as
-    ``status='failed'`` rows and returned instead of raised, so callers get a
+    ``completed=0`` rows and returned instead of raised, so callers get a
     complete audit trail of every submitted backtest.
+
+    ``initialize_db=False`` skips schema migration on open; batch workers use it
+    after the runner has initialised the database once.
     """
     if not expression or not expression.strip():
         raise ValueError("expression must be a non-empty Fast Expression string")
@@ -82,7 +86,7 @@ def run_simulation(
     simulated_at = storage.utc_now()
     started = time.monotonic()
 
-    connection = storage.connect(db_path or DEFAULT_DB_PATH)
+    connection = storage.connect(db_path or DEFAULT_DB_PATH, initialize=initialize_db)
     owned_client = client is None
     if client is None:
         client = BrainSimulationClient(load_credentials(credentials_path), poll_timeout=timeout)

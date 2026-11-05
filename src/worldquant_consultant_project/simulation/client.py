@@ -27,10 +27,12 @@ class BrainSimulationError(RuntimeError):
         *,
         status_code: int | None = None,
         payload: dict[str, Any] | None = None,
+        retry_after: float | None = None,
     ) -> None:
         super().__init__(message)
         self.status_code = status_code
         self.payload = payload or {}
+        self.retry_after = retry_after
 
     @property
     def detail(self) -> str:
@@ -56,11 +58,13 @@ class BrainSimulationClient:
         base_url: str = BASE_URL,
         timeout: float = 60.0,
         poll_timeout: float = 900.0,
+        max_submit_retries: int = 60,
         session: requests.Session | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
         self.poll_timeout = poll_timeout
+        self.max_submit_retries = max_submit_retries
         self._credentials = credentials
         self._session = session or requests.Session()
         self._authenticated = False
@@ -104,7 +108,25 @@ class BrainSimulationClient:
             "settings": settings_payload,
             "regular": expression,
         }
-        response = self._request("post", SIMULATIONS_PATH, json=payload)
+        # The platform rejects submissions beyond the account's concurrency allowance with
+        # 429 + Retry-After; wait it out instead of failing the whole backtest.
+        attempts = 0
+        while True:
+            try:
+                response = self._request("post", SIMULATIONS_PATH, json=payload)
+                break
+            except BrainSimulationError as exc:
+                if exc.status_code != 429 or attempts >= self.max_submit_retries:
+                    raise
+                attempts += 1
+                delay = exc.retry_after if exc.retry_after else _retry_after_from_payload(exc.payload)
+                logger.info(
+                    "submission rejected by the concurrency limit, retrying in %.1fs (%d/%d)",
+                    delay,
+                    attempts,
+                    self.max_submit_retries,
+                )
+                time.sleep(delay)
         location = response.headers.get("Location") or response.headers.get("location")
         if not location:
             raise BrainSimulationError(
@@ -188,10 +210,12 @@ class BrainSimulationClient:
         location = payload.get("location")
         if isinstance(location, dict) and location.get("line"):
             detail = f"{detail} (line {location.get('line')}, start {location.get('start')})"
+        retry_after = response.headers.get("Retry-After")
         raise BrainSimulationError(
             f"{method.upper()} {path} returned HTTP {response.status_code}: {detail}".rstrip(": "),
             status_code=response.status_code,
             payload=payload,
+            retry_after=float(retry_after) if _is_number(retry_after) else None,
         )
 
     def _get_with_auth_retry(self, url: str) -> requests.Response:
@@ -218,3 +242,23 @@ def _poll_delay(retry_after: str | None) -> float:
     except (TypeError, ValueError):
         delay = MIN_POLL_INTERVAL
     return min(max(delay, MIN_POLL_INTERVAL), MAX_POLL_INTERVAL)
+
+
+def _retry_after_from_payload(payload: dict[str, Any]) -> float:
+    """Use the platform's Retry-After hint when present, else a short default."""
+    for key in ("Retry-After", "retry_after", "retryAfter"):
+        value = payload.get(key)
+        if value is not None:
+            try:
+                return min(max(float(value), 1.0), 300.0)
+            except (TypeError, ValueError):
+                break
+    return 5.0
+
+
+def _is_number(value: Any) -> bool:
+    try:
+        float(value)
+    except (TypeError, ValueError):
+        return False
+    return True
