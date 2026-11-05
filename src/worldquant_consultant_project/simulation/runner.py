@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
 import logging
 import sqlite3
 import time
@@ -43,18 +41,9 @@ class SimulationOutcome:
         return self.status == "completed"
 
 
-def settings_fingerprint(expression: str, settings: SimulationSettings) -> str:
-    payload = json.dumps(
-        {"expression": expression, "settings": settings.payload},
-        sort_keys=True,
-        ensure_ascii=False,
-    )
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
-
-
 def _extract_metrics(alpha: dict[str, Any]) -> dict[str, dict[str, Any]]:
     metrics: dict[str, dict[str, Any]] = {}
-    for sample in storage.SAMPLES:
+    for sample in ("is",) + storage.OTHER_SAMPLES:
         block = alpha.get(sample)
         if isinstance(block, dict):
             metrics[sample] = {
@@ -91,7 +80,6 @@ def run_simulation(
 
     sim_uid = uuid.uuid4().hex
     submitted_at = storage.utc_now()
-    fingerprint = settings_fingerprint(expression, resolved)
     started = time.monotonic()
 
     connection = storage.connect(db_path or DEFAULT_DB_PATH)
@@ -117,8 +105,7 @@ def run_simulation(
             sim_uid=sim_uid,
             expression=expression,
             settings=resolved.stored,
-            settings_hash=fingerprint,
-            status="running",
+            completed=False,
             submitted_at=submitted_at,
             braint_sim_id=outcome.braint_sim_id,
         )
@@ -131,8 +118,9 @@ def run_simulation(
         outcome.alpha_id = str(alpha_id)
         alpha_body = client.get_alpha(outcome.alpha_id)
         outcome.metrics = _extract_metrics(alpha_body)
-        outcome.submittable, blockers = storage.derive_submittable(alpha_body)
-        outcome.submit_blockers = json.loads(blockers) if blockers else []
+        submittable, blockers = storage.derive_submittable(alpha_body)
+        outcome.submittable = submittable
+        outcome.submit_blockers = blockers
         outcome.status = "completed"
     except BrainSimulationError as exc:
         outcome.error = getattr(exc, "detail", None) or str(exc)
@@ -150,14 +138,13 @@ def run_simulation(
             sim_uid=sim_uid,
             expression=expression,
             settings=resolved.stored,
-            settings_hash=fingerprint,
-            status=outcome.status,
+            completed=outcome.ok,
             submitted_at=submitted_at,
+            duration_seconds=outcome.duration_seconds,
             braint_sim_id=outcome.braint_sim_id,
             alpha_id=outcome.alpha_id,
             error=outcome.error,
             finished_at=storage.utc_now() if outcome.ok else None,
-            duration_seconds=outcome.duration_seconds,
             simulation_body=simulation_body,
             alpha_body=alpha_body,
         )

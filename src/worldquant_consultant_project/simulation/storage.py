@@ -1,111 +1,108 @@
-"""SQLite persistence for simulation runs: one row per backtest."""
+"""SQLite persistence for simulation runs.
+
+Two tables only:
+``simulations``        one row per backtest: id, expression, settings JSON, completion,
+                       timing, every in-sample metric and one column per submission check.
+``simulation_details`` the 1:1 side table with identifiers, errors, other samples and raw payloads.
+"""
 
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
-# BRAIN sample blocks in the /alphas/{id} payload, in column-name order.
-SAMPLES: tuple[str, ...] = ("is", "os", "train", "test", "prod")
-
-# Numeric metric columns expanded per sample as <sample>_<column>.
-NUMERIC_METRICS: tuple[tuple[str, str, str], ...] = (
-    ("sharpe", "sharpe", "REAL"),
-    ("fitness", "fitness", "REAL"),
-    ("returns", "returns", "REAL"),
-    ("turnover", "turnover", "REAL"),
-    ("drawdown", "drawdown", "REAL"),
-    ("margin", "margin", "REAL"),
-    ("pnl", "pnl", "REAL"),
-    ("book_size", "bookSize", "REAL"),
-    ("long_count", "longCount", "INTEGER"),
-    ("short_count", "shortCount", "INTEGER"),
-    ("self_correlation", "selfCorrelation", "REAL"),
-    ("prod_correlation", "prodCorrelation", "REAL"),
+# In-sample metric columns: ``<column>`` holds ``is.<source>``.
+IS_METRICS: tuple[tuple[str, str, str], ...] = (
+    ("is_sharpe", "sharpe", "REAL"),
+    ("is_fitness", "fitness", "REAL"),
+    ("is_returns", "returns", "REAL"),
+    ("is_turnover", "turnover", "REAL"),
+    ("is_drawdown", "drawdown", "REAL"),
+    ("is_margin", "margin", "REAL"),
+    ("is_pnl", "pnl", "REAL"),
+    ("is_book_size", "bookSize", "REAL"),
+    ("is_long_count", "longCount", "INTEGER"),
+    ("is_short_count", "shortCount", "INTEGER"),
+    ("is_start_date", "startDate", "TEXT"),
 )
 
-TEXT_METRICS: tuple[tuple[str, str], ...] = (
-    ("start_date", "startDate"),
-    ("drawdown_start_date", "drawdownStartDate"),
+# Samples that are only kept as JSON in the side table.
+OTHER_SAMPLES: tuple[str, ...] = ("os", "train", "test", "prod")
+
+CHECK_COLUMN_PREFIX = "check_"
+CHECK_RESULTS = ("PASS", "FAIL", "PENDING")
+
+MAIN_COLUMNS: tuple[str, ...] = (
+    "sim_uid",
+    "expression",
+    "settings_json",
+    "completed",
+    "submitted_at",
+    "duration_seconds",
+) + tuple(column for column, _, _ in IS_METRICS)
+
+DETAIL_COLUMNS: tuple[str, ...] = (
+    "sim_uid",
+    "alpha_id",
+    "braint_sim_id",
+    "error",
+    "finished_at",
+    "other_samples_json",
+    "is_extra_json",
+    "checks_json",
+    "raw_simulation_json",
+    "raw_alpha_json",
 )
 
-COUNT_COLUMNS: tuple[str, ...] = ("checks_passed", "checks_failed", "checks_pending")
+_BASE_SCHEMA = """
+PRAGMA foreign_keys = ON;
 
-# Sample keys consumed by explicit columns; everything else lands in <sample>_metrics_json.
-RESERVED_SAMPLE_KEYS = frozenset(
-    {source for _, source, _ in NUMERIC_METRICS}
-    | {source for _, source in TEXT_METRICS}
-    | {"checks"}
-)
-
-METADATA_COLUMNS: tuple[tuple[str, str], ...] = (
-    ("sim_uid", "TEXT PRIMARY KEY"),
-    ("expression", "TEXT NOT NULL"),
-    ("language", "TEXT NOT NULL DEFAULT 'FASTEXPR'"),
-    ("instrument_type", "TEXT"),
-    ("region", "TEXT"),
-    ("universe", "TEXT"),
-    ("delay", "INTEGER"),
-    ("decay", "INTEGER"),
-    ("neutralization", "TEXT"),
-    ("truncation", "REAL"),
-    ("pasteurization", "TEXT"),
-    ("unit_handling", "TEXT"),
-    ("nan_handling", "TEXT"),
-    ("settings_json", "TEXT NOT NULL"),
-    ("settings_hash", "TEXT NOT NULL"),
-    ("braint_sim_id", "TEXT"),
-    ("alpha_id", "TEXT"),
-    ("status", "TEXT NOT NULL"),
-    ("has_error", "INTEGER NOT NULL DEFAULT 0"),
-    ("submittable", "INTEGER"),
-    ("submit_blockers", "TEXT"),
-    ("error", "TEXT"),
-    ("submitted_at", "TEXT NOT NULL"),
-    ("finished_at", "TEXT"),
-    ("duration_seconds", "REAL"),
-    ("raw_simulation_json", "TEXT"),
-    ("raw_alpha_json", "TEXT"),
-)
-
-LEGACY_TABLES = (
-    "simulation_results",
-    "simulation_metrics",
-    "simulation_checks",
-)
-LEGACY_VIEW = "v_simulation_summary"
-
-
-def sample_columns() -> list[tuple[str, str]]:
-    """``(column, type)`` pairs for every per-sample metric column."""
-    columns: list[tuple[str, str]] = []
-    for sample in SAMPLES:
-        columns.extend((f"{sample}_{name}", kind) for name, _, kind in NUMERIC_METRICS)
-        columns.extend((f"{sample}_{name}", "TEXT") for name, _ in TEXT_METRICS)
-        columns.extend((f"{sample}_{name}", "INTEGER") for name in COUNT_COLUMNS)
-        columns.append((f"{sample}_checks_json", "TEXT"))
-        columns.append((f"{sample}_metrics_json", "TEXT"))
-    return columns
-
-
-TABLE_COLUMNS: tuple[tuple[str, str], ...] = METADATA_COLUMNS + tuple(sample_columns())
-COLUMN_NAMES: tuple[str, ...] = tuple(name for name, _ in TABLE_COLUMNS)
-
-
-def _schema_sql() -> str:
-    body = ",\n    ".join(f"{name} {kind}" for name, kind in TABLE_COLUMNS)
-    return f"""
 CREATE TABLE IF NOT EXISTS simulations (
-    {body}
+    sim_uid          TEXT PRIMARY KEY,
+    expression       TEXT NOT NULL,
+    settings_json    TEXT NOT NULL,
+    completed        INTEGER NOT NULL DEFAULT 0,
+    submitted_at     TEXT NOT NULL,
+    duration_seconds REAL,
+    {metric_columns}
 );
 
-CREATE INDEX IF NOT EXISTS idx_simulations_alpha    ON simulations (alpha_id);
-CREATE INDEX IF NOT EXISTS idx_simulations_status   ON simulations (status);
-CREATE INDEX IF NOT EXISTS idx_simulations_settings ON simulations (settings_hash);
-CREATE INDEX IF NOT EXISTS idx_simulations_created  ON simulations (submitted_at);
+CREATE INDEX IF NOT EXISTS idx_simulations_submitted ON simulations (submitted_at);
+
+CREATE TABLE IF NOT EXISTS simulation_details (
+    sim_uid             TEXT PRIMARY KEY,
+    alpha_id            TEXT,
+    braint_sim_id       TEXT,
+    error               TEXT,
+    finished_at         TEXT,
+    other_samples_json  TEXT,
+    is_extra_json       TEXT,
+    checks_json         TEXT,
+    raw_simulation_json TEXT,
+    raw_alpha_json      TEXT,
+    FOREIGN KEY (sim_uid) REFERENCES simulations (sim_uid) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_details_alpha ON simulation_details (alpha_id);
+
+DROP VIEW IF EXISTS v_simulation_summary;
+CREATE VIEW v_simulation_summary AS
+SELECT s.sim_uid,
+       s.expression,
+       s.completed,
+       s.submitted_at,
+       s.duration_seconds,
+       s.is_sharpe,
+       s.is_fitness,
+       s.is_turnover,
+       d.alpha_id
+FROM simulations AS s
+LEFT JOIN simulation_details AS d ON d.sim_uid = s.sim_uid
+ORDER BY s.submitted_at DESC;
 """
 
 
@@ -113,37 +110,20 @@ def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
-BLOCKING_RESULTS = frozenset({"FAIL", "PENDING"})
+def check_column(name: str) -> str:
+    """Map a BRAIN check name onto its column, e.g. LOW_SHARPE -> check_low_sharpe."""
+    slug = re.sub(r"[^a-z0-9]+", "_", str(name).strip().lower()).strip("_")
+    return f"{CHECK_COLUMN_PREFIX}{slug or 'unnamed'}"
 
 
-def derive_submittable(alpha: Mapping[str, Any] | None) -> tuple[int | None, str | None]:
-    """Decide whether BRAIN would allow submitting this alpha.
+def _metric_column_sql() -> str:
+    return ",\n    ".join(f"{column} {kind}" for column, _, kind in IS_METRICS)
 
-    BRAIN exposes no "submittable" flag: submission is gated by the IS checks, so the
-    alpha is submittable only when every check passed (no FAIL, no PENDING).
-    """
-    if not alpha:
-        return None, None
-    block = alpha.get("is")
-    if not isinstance(block, Mapping):
-        return None, None
-    checks = [c for c in (block.get("checks") or []) if isinstance(c, Mapping)]
-    if not checks:
-        return None, None
 
-    blockers = [
-        {
-            "name": check.get("name"),
-            "result": check.get("result"),
-            "value": check.get("value"),
-            "limit": check.get("limit"),
-        }
-        for check in checks
-        if str(check.get("result") or "").upper() in BLOCKING_RESULTS
-    ]
-    if blockers:
-        return 0, json.dumps(blockers, ensure_ascii=False)
-    return 1, None
+def _needs_rebuild(connection: sqlite3.Connection) -> bool:
+    """The pre-simplification table had 122 columns and no ``completed`` flag."""
+    columns = {row["name"] for row in connection.execute("PRAGMA table_info(simulations)")}
+    return bool(columns) and "completed" not in columns
 
 
 def connect(path: Path | str) -> sqlite3.Connection:
@@ -152,344 +132,200 @@ def connect(path: Path | str) -> sqlite3.Connection:
     connection = sqlite3.connect(str(db_path))
     connection.row_factory = sqlite3.Row
     connection.execute("PRAGMA journal_mode = WAL")
-    migrate_legacy(connection)
-    connection.executescript(_schema_sql())
-    ensure_columns(connection)
-    backfill_submittable(connection)
+    connection.execute("PRAGMA foreign_keys = ON")
+    if _needs_rebuild(connection):
+        # The simplified layout starts empty: old wide tables are dropped on purpose.
+        connection.executescript(
+            "DROP VIEW IF EXISTS v_simulation_summary;"
+            "DROP TABLE IF EXISTS simulation_details;"
+            "DROP TABLE IF EXISTS simulations;"
+            "DROP TABLE IF EXISTS simulation_results;"
+            "DROP TABLE IF EXISTS simulation_metrics;"
+            "DROP TABLE IF EXISTS simulation_checks;"
+        )
+    connection.executescript(_BASE_SCHEMA.format(metric_columns=_metric_column_sql()))
     connection.commit()
     return connection
 
 
-def ensure_columns(connection: sqlite3.Connection) -> list[str]:
-    """Add columns introduced after a database was first created."""
+def ensure_check_columns(connection: sqlite3.Connection, names: Iterable[str]) -> list[str]:
+    """Add one column per newly seen submission check. Idempotent."""
     existing = {row["name"] for row in connection.execute("PRAGMA table_info(simulations)")}
     added: list[str] = []
-    for name, kind in TABLE_COLUMNS:
-        if name in existing:
+    for name in names:
+        column = check_column(name)
+        if column in existing:
             continue
-        base_type = kind.split()[0]
-        connection.execute(f"ALTER TABLE simulations ADD COLUMN {name} {base_type}")
-        added.append(name)
-    connection.commit()
+        connection.execute(f"ALTER TABLE simulations ADD COLUMN {column} TEXT")
+        existing.add(column)
+        added.append(column)
+    if added:
+        connection.commit()
     return added
 
 
-def backfill_submittable(connection: sqlite3.Connection) -> int:
-    """Recompute the derived columns for rows written before they existed."""
-    rows = connection.execute(
-        "SELECT sim_uid, is_checks_json FROM simulations WHERE submittable IS NULL"
-    ).fetchall()
-    updated = 0
-    for row in rows:
-        checks = _load_json_list(row["is_checks_json"])
-        if not checks:
-            continue
-        alpha = {"is": {"checks": checks}}
-        submittable, blockers = derive_submittable(alpha)
-        connection.execute(
-            "UPDATE simulations SET submittable = ?, submit_blockers = ? WHERE sim_uid = ?",
-            (submittable, blockers, row["sim_uid"]),
-        )
-        updated += 1
-    connection.commit()
-    return updated
+def known_check_columns(connection: sqlite3.Connection) -> list[str]:
+    columns = [row["name"] for row in connection.execute("PRAGMA table_info(simulations)")]
+    return [column for column in columns if column.startswith(CHECK_COLUMN_PREFIX)]
 
 
 # --------------------------------------------------------------------- writes
 
 
-def sample_values(alpha: Mapping[str, Any], sample: str) -> dict[str, Any]:
-    """Map one BRAIN sample block onto its ``<sample>_*`` columns."""
-    prefix = sample
-    block = alpha.get(sample)
-    values: dict[str, Any] = {f"{prefix}_{name}": None for name, _, _ in NUMERIC_METRICS}
-    values.update({f"{prefix}_{name}": None for name, _ in TEXT_METRICS})
-    values.update({f"{prefix}_{name}": None for name in COUNT_COLUMNS})
-    values[f"{prefix}_checks_json"] = None
-    values[f"{prefix}_metrics_json"] = None
-    if not isinstance(block, Mapping):
-        return values
+def _is_block(alpha: Mapping[str, Any] | None) -> Mapping[str, Any]:
+    if not alpha:
+        return {}
+    block = alpha.get("is")
+    return block if isinstance(block, Mapping) else {}
 
-    checks = [c for c in (block.get("checks") or []) if isinstance(c, Mapping)]
-    results = [str(c.get("result") or "").upper() for c in checks]
-    values[f"{prefix}_checks_passed"] = sum(1 for r in results if r == "PASS")
-    values[f"{prefix}_checks_failed"] = sum(1 for r in results if r == "FAIL")
-    values[f"{prefix}_checks_pending"] = sum(1 for r in results if r == "PENDING")
-    values[f"{prefix}_checks_json"] = json.dumps(checks, ensure_ascii=False) if checks else None
 
-    leftovers: dict[str, Any] = {}
-    for key, value in block.items():
-        if key in RESERVED_SAMPLE_KEYS:
-            continue
-        leftovers[key] = value
-    values[f"{prefix}_metrics_json"] = json.dumps(leftovers, ensure_ascii=False) if leftovers else None
+def _checks(alpha: Mapping[str, Any] | None) -> list[Mapping[str, Any]]:
+    return [c for c in (_is_block(alpha).get("checks") or []) if isinstance(c, Mapping)]
 
-    for name, source, kind in NUMERIC_METRICS:
-        raw = block.get(source)
-        if isinstance(raw, bool) or raw is None:
-            values[f"{prefix}_{name}"] = None if raw is None else int(raw)
-        elif isinstance(raw, (int, float)):
-            values[f"{prefix}_{name}"] = raw
-        else:
-            values[f"{prefix}_{name}"] = None
 
-    for name, source in TEXT_METRICS:
-        raw = block.get(source)
-        values[f"{prefix}_{name}"] = raw if isinstance(raw, str) else None
-
+def check_values(alpha: Mapping[str, Any] | None) -> dict[str, str]:
+    """``{check_column: PASS|FAIL|PENDING}`` for one alpha."""
+    values: dict[str, str] = {}
+    for check in _checks(alpha):
+        result = str(check.get("result") or "").upper()
+        values[check_column(str(check.get("name") or "unnamed"))] = (
+            result if result in CHECK_RESULTS else "UNKNOWN"
+        )
     return values
 
 
-def build_row(
+def derive_submittable(alpha: Mapping[str, Any] | None) -> tuple[int | None, list[dict[str, Any]]]:
+    """Whether BRAIN would accept the alpha, plus the blocking checks.
+
+    Kept as a helper for callers/reporting; the database derives it from the check columns.
+    """
+    checks = _checks(alpha)
+    if not checks:
+        return None, []
+    blockers = [
+        {
+            "name": check.get("name"),
+            "result": check.get("result"),
+            "value": check.get("value"),
+            "limit": check.get("limit"),
+        }
+        for check in checks
+        if str(check.get("result") or "").upper() in ("FAIL", "PENDING")
+    ]
+    return (0 if blockers else 1), blockers
+
+
+def build_rows(
     *,
     sim_uid: str,
     expression: str,
     settings: Mapping[str, Any],
-    settings_hash: str,
-    status: str,
+    completed: bool,
     submitted_at: str,
-    braint_sim_id: str | None = None,
+    duration_seconds: float | None = None,
     alpha_id: str | None = None,
+    braint_sim_id: str | None = None,
     error: str | None = None,
     finished_at: str | None = None,
-    duration_seconds: float | None = None,
     simulation_body: Mapping[str, Any] | None = None,
     alpha_body: Mapping[str, Any] | None = None,
-) -> dict[str, Any]:
-    """Build the complete single-table row for one backtest."""
-    submittable, blockers = derive_submittable(alpha_body)
-    row: dict[str, Any] = {
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Build the main row and its side-table row for one backtest."""
+    block = _is_block(alpha_body)
+    main: dict[str, Any] = {
         "sim_uid": sim_uid,
         "expression": expression,
-        "language": str(settings.get("language", "FASTEXPR")),
-        "instrument_type": settings.get("instrument_type"),
-        "region": settings.get("region"),
-        "universe": settings.get("universe"),
-        "delay": _as_int(settings.get("delay")),
-        "decay": _as_int(settings.get("decay")),
-        "neutralization": settings.get("neutralization"),
-        "truncation": _as_float(settings.get("truncation")),
-        "pasteurization": settings.get("pasteurization"),
-        "unit_handling": settings.get("unit_handling"),
-        "nan_handling": settings.get("nan_handling"),
-        "settings_json": json.dumps(settings, ensure_ascii=False),
-        "settings_hash": settings_hash,
-        "braint_sim_id": braint_sim_id,
-        "alpha_id": alpha_id,
-        "status": status,
-        "has_error": 0 if status in ("completed", "running") else 1,
-        "submittable": submittable,
-        "submit_blockers": blockers,
-        "error": error,
+        "settings_json": json.dumps(settings, ensure_ascii=False, sort_keys=True),
+        "completed": 1 if completed else 0,
         "submitted_at": submitted_at,
-        "finished_at": finished_at,
         "duration_seconds": duration_seconds,
+    }
+    for column, source, _ in IS_METRICS:
+        value = block.get(source)
+        if isinstance(value, bool):
+            main[column] = int(value)
+        elif isinstance(value, (int, float, str)) or value is None:
+            main[column] = value
+        else:
+            main[column] = None
+    main.update(check_values(alpha_body))
+
+    known_sources = {source for _, source, _ in IS_METRICS}
+    extra_is = {k: v for k, v in block.items() if k not in known_sources and k != "checks"}
+    others = {
+        sample: alpha_body[sample]
+        for sample in OTHER_SAMPLES
+        if alpha_body and isinstance(alpha_body.get(sample), Mapping)
+    }
+    details: dict[str, Any] = {
+        "sim_uid": sim_uid,
+        "alpha_id": alpha_id,
+        "braint_sim_id": braint_sim_id,
+        "error": error,
+        "finished_at": finished_at,
+        "other_samples_json": json.dumps(others, ensure_ascii=False) if others else None,
+        "is_extra_json": json.dumps(extra_is, ensure_ascii=False) if extra_is else None,
+        "checks_json": (
+            json.dumps(_checks(alpha_body), ensure_ascii=False) if alpha_body else None
+        ),
         "raw_simulation_json": _dump(simulation_body),
         "raw_alpha_json": _dump(alpha_body),
     }
-    for sample in SAMPLES:
-        row.update(
-            sample_values(alpha_body or {}, sample)
-            if alpha_body
-            else {name: None for name, _ in sample_columns() if name.startswith(f"{sample}_")}
-        )
-    return row
+    return main, details
 
 
 def write_outcome(connection: sqlite3.Connection, **kwargs: Any) -> None:
-    """Insert or update the single row describing one backtest."""
-    row = build_row(**kwargs)
-    placeholders = ", ".join(f":{name}" for name in COLUMN_NAMES)
-    updates = ", ".join(
-        f"{name} = excluded.{name}" for name in COLUMN_NAMES if name != "sim_uid"
+    """Insert or update one backtest (main row + side row), adding check columns as needed."""
+    main, details = build_rows(**kwargs)
+    new_checks = [column for column in main if column.startswith(CHECK_COLUMN_PREFIX)]
+    ensure_check_columns(connection, [column[len(CHECK_COLUMN_PREFIX):] for column in new_checks])
+
+    main_columns = list(main)
+    placeholders = ", ".join(f":{name}" for name in main_columns)
+    updates = ", ".join(f"{name} = excluded.{name}" for name in main_columns if name != "sim_uid")
+    connection.execute(
+        f"INSERT INTO simulations ({', '.join(main_columns)}) VALUES ({placeholders})"
+        f" ON CONFLICT (sim_uid) DO UPDATE SET {updates}",
+        main,
+    )
+    detail_placeholders = ", ".join(f":{name}" for name in DETAIL_COLUMNS)
+    detail_updates = ", ".join(
+        f"{name} = excluded.{name}" for name in DETAIL_COLUMNS if name != "sim_uid"
     )
     connection.execute(
-        f"INSERT INTO simulations ({', '.join(COLUMN_NAMES)}) VALUES ({placeholders})"
-        f" ON CONFLICT (sim_uid) DO UPDATE SET {updates}",
-        row,
+        f"INSERT INTO simulation_details ({', '.join(DETAIL_COLUMNS)}) VALUES ({detail_placeholders})"
+        f" ON CONFLICT (sim_uid) DO UPDATE SET {detail_updates}",
+        details,
     )
     connection.commit()
 
 
-# ------------------------------------------------------------------ migration
+# -------------------------------------------------------------------- reading
 
 
-def _table_exists(connection: sqlite3.Connection, name: str) -> bool:
-    return (
+def summary_columns(connection: sqlite3.Connection) -> list[str]:
+    return [
+        "sim_uid",
+        "expression",
+        "completed",
+        "submitted_at",
+        "duration_seconds",
+        "is_sharpe",
+        "is_fitness",
+        "is_turnover",
+        "alpha_id",
+    ]
+
+
+def recent(connection: sqlite3.Connection, limit: int = 10) -> list[sqlite3.Row]:
+    return list(
         connection.execute(
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)
-        ).fetchone()
-        is not None
+            "SELECT * FROM v_simulation_summary LIMIT ?", (limit,)
+        )
     )
-
-
-def migrate_legacy(connection: sqlite3.Connection) -> bool:
-    """Fold the former four-table layout into ``simulations``.
-
-    Returns True when a migration was performed.
-    """
-    legacy_present = any(_table_exists(connection, name) for name in LEGACY_TABLES)
-    if not legacy_present:
-        return False
-
-    connection.executescript("DROP VIEW IF EXISTS " + LEGACY_VIEW)
-    for name in ("simulations", *LEGACY_TABLES):
-        if _table_exists(connection, name):
-            connection.execute(f"ALTER TABLE {name} RENAME TO {name}_legacy")
-    connection.executescript(_schema_sql())
-
-    old_rows = list(connection.execute("SELECT * FROM simulations_legacy"))
-    migrated = 0
-    for old in old_rows:
-        sim_uid = old["sim_uid"]
-        row: dict[str, Any] = {name: None for name in COLUMN_NAMES}
-        for name in ("sim_uid", "expression", "language", "instrument_type", "region", "universe",
-                     "delay", "decay", "neutralization", "truncation", "pasteurization",
-                     "unit_handling", "nan_handling", "settings_json", "settings_hash",
-                     "braint_sim_id", "alpha_id", "status", "error", "submitted_at",
-                     "finished_at", "duration_seconds", "raw_simulation_json", "raw_alpha_json"):
-            row[name] = old[name]
-        row["has_error"] = 0 if old["status"] == "completed" else 1
-
-        for result in connection.execute(
-            "SELECT * FROM simulation_results_legacy WHERE sim_uid = ?", (sim_uid,)
-        ):
-            sample = result["sample"]
-            if sample not in SAMPLES:
-                continue
-            key = dict(result)
-            for name, source, _ in NUMERIC_METRICS:
-                row[f"{sample}_{name}"] = key.get(source if source in key else name)
-            for name, _source in TEXT_METRICS:
-                row[f"{sample}_{name}"] = key.get(name)
-            for name in COUNT_COLUMNS:
-                row[f"{sample}_{name}"] = key.get(name)
-
-        for metric in connection.execute(
-            "SELECT * FROM simulation_metrics_legacy WHERE sim_uid = ?", (sim_uid,)
-        ):
-            sample = metric["sample"]
-            name = metric["metric"]
-            if sample not in SAMPLES or name in RESERVED_SAMPLE_KEYS:
-                continue
-            if metric["value"] is not None:
-                leftover = _load_json(row[f"{sample}_metrics_json"])
-                leftover[name] = metric["value"]
-                row[f"{sample}_metrics_json"] = json.dumps(leftover, ensure_ascii=False)
-            elif metric["value_text"] is not None:
-                text_columns = {source: column for column, source in TEXT_METRICS}
-                column_name = text_columns.get(name)
-                if column_name and row[f"{sample}_{column_name}"] is None:
-                    row[f"{sample}_{column_name}"] = metric["value_text"]
-
-        checks = list(
-            connection.execute(
-                "SELECT * FROM simulation_checks_legacy WHERE sim_uid = ?", (sim_uid,)
-            )
-        )
-        grouped: dict[str, list[dict[str, Any]]] = {}
-        for check in checks:
-            grouped.setdefault(check["sample"], []).append(
-                {
-                    "name": check["name"],
-                    "result": check["result"],
-                    "value": check["value"],
-                    "limit": check["limit"],
-                    "year": check["year"],
-                    "message": check["message"],
-                }
-            )
-        for sample, items in grouped.items():
-            if sample in SAMPLES:
-                row[f"{sample}_checks_json"] = json.dumps(items, ensure_ascii=False)
-
-        placeholders = ", ".join(f":{name}" for name in COLUMN_NAMES)
-        connection.execute(
-            f"INSERT INTO simulations ({', '.join(COLUMN_NAMES)}) VALUES ({placeholders})", row
-        )
-        migrated += 1
-
-    new_count = connection.execute("SELECT COUNT(*) FROM simulations").fetchone()[0]
-    if new_count != len(old_rows):
-        raise RuntimeError(
-            f"legacy migration incomplete: expected {len(old_rows)} rows, found {new_count}"
-        )
-
-    for name in LEGACY_TABLES:
-        connection.execute(f"DROP TABLE IF EXISTS {name}_legacy")
-    connection.execute("DROP TABLE IF EXISTS simulations_legacy")
-    connection.commit()
-    return True
-
-
-# -------------------------------------------------------------------- helpers
-
-
-def _load_json(value: str | None) -> dict[str, Any]:
-    if not value:
-        return {}
-    try:
-        parsed = json.loads(value)
-    except ValueError:
-        return {}
-    return parsed if isinstance(parsed, dict) else {}
-
-
-def _load_json_list(value: str | None) -> list[dict[str, Any]]:
-    if not value:
-        return []
-    try:
-        parsed = json.loads(value)
-    except ValueError:
-        return []
-    return [item for item in parsed if isinstance(item, dict)] if isinstance(parsed, list) else []
 
 
 def _dump(value: Any) -> str | None:
     if value is None:
         return None
     return json.dumps(value, ensure_ascii=False)
-
-
-def _as_int(value: Any) -> int | None:
-    if value is None:
-        return None
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return None
-
-
-def _as_float(value: Any) -> float | None:
-    if value is None:
-        return None
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return None
-
-
-SUMMARY_COLUMNS = (
-    "sim_uid",
-    "expression",
-    "universe",
-    "delay",
-    "decay",
-    "status",
-    "has_error",
-    "submittable",
-    "is_sharpe",
-    "is_fitness",
-    "os_sharpe",
-    "os_fitness",
-    "alpha_id",
-    "duration_seconds",
-    "submitted_at",
-)
-
-
-def recent(connection: sqlite3.Connection, limit: int = 10) -> Iterable[sqlite3.Row]:
-    columns = ", ".join(SUMMARY_COLUMNS)
-    return connection.execute(
-        f"SELECT {columns} FROM simulations ORDER BY submitted_at DESC LIMIT ?", (limit,)
-    ).fetchall()

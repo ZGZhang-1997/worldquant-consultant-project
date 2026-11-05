@@ -144,13 +144,11 @@ def main(argv: list[str] | None = None) -> int:
         if rows:
             print("recent runs:")
             for row in rows:
-                flag = "error" if row["has_error"] else "ok"
-                submittable = "-" if row["submittable"] is None else row["submittable"]
+                state = "done" if row["completed"] else "failed"
                 print(
-                    f"  {row['submitted_at']}  {row['status']:<9} [{flag}] "
-                    f"submittable={submittable}  sharpe={row['is_sharpe']}  "
-                    f"fitness={row['is_fitness']}  "
-                    f"{row['universe']}/d{row['delay']}/decay{row['decay']}"
+                    f"  {row['submitted_at']}  {state:<6} sharpe={row['is_sharpe']}  "
+                    f"fitness={row['is_fitness']}  turnover={row['is_turnover']}  "
+                    f"alpha={row['alpha_id']}  {row['duration_seconds']}s"
                 )
     finally:
         connection.close()
