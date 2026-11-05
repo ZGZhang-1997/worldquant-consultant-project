@@ -236,3 +236,76 @@ BRAIN 的 `/alphas/{id}` 响应里**没有**「能否提交」字段，只有 `s
 BRAIN 的轮询约定是「响应带 `Retry-After` 头即未完成」，客户端据此等待并兼容
 `{"progress": 0.x}` 的进度体。
 
+## 模板生成因子（Template.json → alpha.db）
+
+子包：[`src/worldquant_consultant_project/Template_based_alpha_generate/`](./src/worldquant_consultant_project/Template_based_alpha_generate/)
+读取 [`Template.json`](./src/worldquant_consultant_project/Template_based_alpha_generate/Template.json)，
+按每个槽位的标签规则从 `brain.db` 筛出字段，填入 `formula_pattern` 生成 Fast Expression；
+多槽位模板做**笛卡尔积**，结果写入 `data/alpha.db`。
+
+### 运行
+
+```powershell
+# 只看候选数与组合数，不写库
+uv run python -m worldquant_consultant_project.Template_based_alpha_generate --dry-run
+
+# 小批量试跑（每模板 5 条，写测试库）
+uv run python -m worldquant_consultant_project.Template_based_alpha_generate `
+  --db data/alpha_test.db --limit-per-template 5
+
+# 全量生成
+uv run python -m worldquant_consultant_project.Template_based_alpha_generate
+```
+
+| 参数 | 说明 |
+|---|---|
+| `--templates` | 模板文件，默认模块内 `Template.json` |
+| `--label-source` | `union`（默认，所有模型标签取并集）/ `intersection` / `deepseek` / `gemini` |
+| `--template T01_Relative_Valuation,...` | 只生成指定模板 |
+| `--limit-per-template N` | 每模板最多 N 条（调试） |
+| `--db` / `--brain-db` | 输出库（默认 `data/alpha.db`）/ 字段库（默认 `data/brain.db`） |
+| `--dry-run` / `--clear` | 只统计 / 生成前清空 |
+
+退出码：`0` 成功；`2` 模板或库路径问题；`3` 槽位无候选字段。
+
+### 标签来源（并集，且自动适配新模型）
+
+`--label-source union` 会遍历 [`labeling/config.py`](./src/worldquant_consultant_project/labeling/config.py)
+中注册、且在 `data_fields` 中确有标签列的所有 provider（当前 `deepseek` + `gemini`），
+**各自求槽位字段集后取并集**。以后新增模型只需在该注册表登记并跑完打标签，
+生成器会自动纳入，无需改代码。
+
+实测组合数：`union` 29,680；`deepseek` 8,753；`intersection` 7,496。
+
+### 库表结构（`data/alpha.db`）
+
+| 表 / 视图 | 内容 |
+|---|---|
+| `alphas` | 一行一个因子：`alpha_uid`、`template_id`、`template_name`、`expression`、`expression_hash`（唯一，去重）、`slot_count`、`formula_pattern`、`label_source`、`slot_fill_json`、`run_id`、`generated_at` |
+| `alpha_slots` | 每因子每槽位一行：`slot_name`、`slot_index`、`dataset_id`、`field_id`、`description`、`field_type`、`matched_providers`（命中规则的模型）、`labels_json`（各模型 5 维标签） |
+| `v_alpha_expressions` | 表达式速查视图 |
+
+同一表达式重复生成会被 `expression_hash` 唯一索引拦下，重跑不产生重复行。
+
+### 模板定义格式
+
+```json
+{
+  "template_id": "T04_Analyst_Revision_Drift",
+  "slot_count": 1,
+  "formula_pattern": "group_rank(ts_delta({Slot_Expectation}, 20), subindustry)",
+  "slots": {
+    "Slot_Expectation": {
+      "category": ["analyst"],
+      "math_dimension": ["price_level", "ratio_relative", "score_bounded"],
+      "polarity": ["positive"],
+      "domain_support": ["real_unbounded", "strictly_positive", "bounded_interval"],
+      "frequency": ["daily_high", "event_irregular"]
+    }
+  }
+}
+```
+
+- 同一模板内同一槽位可在公式中**重复出现**（如 `ts_delay({Slot_Target}, 252)`），按 `slot_count` 计为 1 个槽位
+- 校验会拦截：占位符与 `slots` 不匹配、`slot_count` 与实际占位符数不符、维度名或枚举值非法
+

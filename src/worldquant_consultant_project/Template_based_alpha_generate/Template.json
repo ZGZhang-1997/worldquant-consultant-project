@@ -1,0 +1,103 @@
+[
+  {
+    "template_id": "T01_Relative_Valuation",
+    "template_name": "行业截面相对估值模板",
+    "description": "衡量在同行业背景下，每单位市场定价所能换取的实际商业价值/权益。寻找盈利、现金流或资产被低估的股票。",
+    "slot_count": 2,
+    "formula_pattern": "group_rank({Slot_Numerator} / {Slot_Denominator}, subindustry)",
+    "slots": {
+      "Slot_Numerator": {
+        "category": ["fundamental"],
+        "math_dimension": ["currency_flow", "currency_stock"],
+        "polarity": ["positive"],
+        "domain_support": ["strictly_positive", "real_unbounded"],
+        "frequency": ["quarterly_fnd"]
+      },
+      "Slot_Denominator": {
+        "category": ["price_volume"],
+        "math_dimension": ["currency_stock"],
+        "polarity": ["neutral_state", "positive"],
+        "domain_support": ["strictly_positive"],
+        "frequency": ["daily_high"]
+      }
+    }
+  },
+  {
+    "template_id": "T02_Fundamental_Acceleration",
+    "template_name": "基本面同比动能与跃迁模板",
+    "description": "消除财务季节性波动后，衡量公司核心经营业务在截面上的净增长动能，同时使用规模指标平减以消除不同体量公司的不可比性。",
+    "slot_count": 2,
+    "formula_pattern": "group_neutralize(({Slot_Target} - ts_delay({Slot_Target}, 252)) / {Slot_Scale}, sector)",
+    "slots": {
+      "Slot_Target": {
+        "category": ["fundamental"],
+        "math_dimension": ["currency_flow"],
+        "polarity": ["positive"],
+        "domain_support": ["real_unbounded", "strictly_positive"],
+        "frequency": ["quarterly_fnd"]
+      },
+      "Slot_Scale": {
+        "category": ["fundamental", "price_volume"],
+        "math_dimension": ["currency_stock"],
+        "polarity": ["positive", "neutral_state"],
+        "domain_support": ["strictly_positive"],
+        "frequency": ["quarterly_fnd", "daily_high"]
+      }
+    }
+  },
+  {
+    "template_id": "T03_Volume_Price_Divergence",
+    "template_name": "短期微观量价背离反转模板",
+    "description": "捕捉量价关系中的异常过热或衰竭特征。当短期价格快速上冲并伴随异常极端换手/放量时，往往面临买方动能衰竭，具有强烈的短期均值回归动力。",
+    "slot_count": 2,
+    "formula_pattern": "-ts_corr(ts_delta({Slot_Price}, 5), {Slot_Activity}, 20)",
+    "slots": {
+      "Slot_Price": {
+        "category": ["price_volume"],
+        "math_dimension": ["price_level"],
+        "polarity": ["neutral_state", "positive"],
+        "domain_support": ["strictly_positive"],
+        "frequency": ["daily_high"]
+      },
+      "Slot_Activity": {
+        "category": ["price_volume", "ownership_trading"],
+        "math_dimension": ["volume_activity", "ratio_relative"],
+        "polarity": ["neutral_state"],
+        "domain_support": ["strictly_positive", "non_negative"],
+        "frequency": ["daily_high"]
+      }
+    }
+  },
+  {
+    "template_id": "T04_Analyst_Revision_Drift",
+    "template_name": "分析师一致预期边际调升漂移模板",
+    "description": "捕捉分析师群体在近一个月内对公司业绩或估值预期的边际改善。由于市场对专业机构调级存在反应不足（Under-reaction），具有明显的后漂移超额收益。",
+    "slot_count": 1,
+    "formula_pattern": "group_rank(ts_delta({Slot_Expectation}, 20), subindustry)",
+    "slots": {
+      "Slot_Expectation": {
+        "category": ["analyst"],
+        "math_dimension": ["price_level", "ratio_relative", "score_bounded"],
+        "polarity": ["positive"],
+        "domain_support": ["real_unbounded", "strictly_positive", "bounded_interval"],
+        "frequency": ["daily_high", "event_irregular"]
+      }
+    }
+  },
+  {
+    "template_id": "T05_Sentiment_Alternative_Shock",
+    "template_name": "另类舆情与微观情绪冲击模板",
+    "description": "利用统计标准化（Z-Score）捕捉另类数据源（如新闻情绪、高管持仓、突发网络热度）的脉冲突变，并在全市场截面上做相对排序。",
+    "slot_count": 1,
+    "formula_pattern": "group_rank(ts_zscore({Slot_Sentiment}, 60), market)",
+    "slots": {
+      "Slot_Sentiment": {
+        "category": ["sentiment_news", "ownership_trading", "alternative_other"],
+        "math_dimension": ["score_bounded", "ratio_relative", "dimensionless_other"],
+        "polarity": ["positive"],
+        "domain_support": ["bounded_interval", "real_unbounded"],
+        "frequency": ["daily_high", "event_irregular"]
+      }
+    }
+  }
+]
