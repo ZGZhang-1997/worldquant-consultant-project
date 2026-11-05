@@ -36,9 +36,15 @@ OTHER_SAMPLES: tuple[str, ...] = ("os", "train", "test", "prod")
 CHECK_COLUMN_PREFIX = "check_"
 CHECK_RESULTS = ("PASS", "FAIL", "PENDING")
 
+# Self-correlation is only computed at submission time, so it is excluded from the
+# "would pass everything else" verdict.
+EXCLUDED_FROM_TENTATIVE = ("check_self_correlation",)
+TENTATIVE_COLUMN = "tentative_submittable"
+
 MAIN_COLUMNS: tuple[str, ...] = (
     "sim_uid",
     "expression",
+    TENTATIVE_COLUMN,
     "settings_json",
     "completed",
     "simulated_at",
@@ -58,21 +64,20 @@ DETAIL_COLUMNS: tuple[str, ...] = (
     "raw_alpha_json",
 )
 
-_BASE_SCHEMA = """
-PRAGMA foreign_keys = ON;
-
-CREATE TABLE IF NOT EXISTS simulations (
+_SIMULATIONS_TABLE = """
+CREATE TABLE IF NOT EXISTS {table} (
     sim_uid          TEXT PRIMARY KEY,
     expression       TEXT NOT NULL,
+    tentative_submittable INTEGER NOT NULL DEFAULT 0,
     settings_json    TEXT NOT NULL,
     completed        INTEGER NOT NULL DEFAULT 0,
     simulated_at     TEXT NOT NULL,
     duration_seconds REAL,
     {metric_columns}
 );
+"""
 
-CREATE INDEX IF NOT EXISTS idx_simulations_simulated ON simulations (simulated_at);
-
+_DETAILS_TABLE = """
 CREATE TABLE IF NOT EXISTS simulation_details (
     sim_uid             TEXT PRIMARY KEY,
     alpha_id            TEXT,
@@ -86,13 +91,17 @@ CREATE TABLE IF NOT EXISTS simulation_details (
     raw_alpha_json      TEXT,
     FOREIGN KEY (sim_uid) REFERENCES simulations (sim_uid) ON DELETE CASCADE
 );
+"""
 
+_INDEXES_AND_VIEW = """
+CREATE INDEX IF NOT EXISTS idx_simulations_simulated ON simulations (simulated_at);
 CREATE INDEX IF NOT EXISTS idx_details_alpha ON simulation_details (alpha_id);
 
 DROP VIEW IF EXISTS v_simulation_summary;
 CREATE VIEW v_simulation_summary AS
 SELECT s.sim_uid,
        s.expression,
+       s.tentative_submittable,
        s.completed,
        s.simulated_at,
        s.duration_seconds,
@@ -104,6 +113,14 @@ FROM simulations AS s
 LEFT JOIN simulation_details AS d ON d.sim_uid = s.sim_uid
 ORDER BY s.simulated_at DESC;
 """
+
+
+def _base_schema() -> str:
+    return (
+        _SIMULATIONS_TABLE.format(table="simulations", metric_columns=_metric_column_sql())
+        + _DETAILS_TABLE
+        + _INDEXES_AND_VIEW
+    )
 
 
 def utc_now() -> str:
@@ -156,20 +173,82 @@ def connect(path: Path | str) -> sqlite3.Connection:
             "DROP TABLE IF EXISTS simulation_checks;"
         )
     _rename_legacy_timestamp(connection)
-    connection.executescript(_BASE_SCHEMA.format(metric_columns=_metric_column_sql()))
+    # The view references tentative_submittable, so any table rebuild must happen first.
+    if not _insert_tentative_column(connection):
+        connection.executescript(_base_schema())
     connection.commit()
     return connection
 
 
-def ensure_check_columns(connection: sqlite3.Connection, names: Iterable[str]) -> list[str]:
+def _insert_tentative_column(connection: sqlite3.Connection) -> bool:
+    """Rebuild the table so ``tentative_submittable`` sits right after ``expression``.
+
+    SQLite can only append columns, and the wide-table layout already shipped without
+    it, so the existing rows are copied into a fresh table with the wanted order.
+    """
+    columns = [row["name"] for row in connection.execute("PRAGMA table_info(simulations)")]
+    if not columns or TENTATIVE_COLUMN in columns:
+        return False
+
+    existing = set(columns)
+    check_columns = [
+        name
+        for name in columns
+        if name.startswith(CHECK_COLUMN_PREFIX) and name not in EXCLUDED_FROM_TENTATIVE
+    ]
+    all_check_columns = [name for name in columns if name.startswith(CHECK_COLUMN_PREFIX)]
+    copy_columns = [
+        name
+        for name in MAIN_COLUMNS + tuple(all_check_columns)
+        if name != TENTATIVE_COLUMN and name in existing
+    ]
+    if check_columns:
+        condition = " AND ".join(f"COALESCE({name}, '') = 'PASS'" for name in check_columns)
+        tentative_sql = f"CASE WHEN {condition} THEN 1 ELSE 0 END"
+    else:
+        tentative_sql = "0"
+
+    connection.commit()
+    connection.execute("PRAGMA foreign_keys = OFF")
+    try:
+        connection.executescript(
+            "DROP VIEW IF EXISTS v_simulation_summary;"
+            "DROP TABLE IF EXISTS simulations_new;"
+        )
+        connection.executescript(
+            _SIMULATIONS_TABLE.format(
+                table="simulations_new", metric_columns=_metric_column_sql()
+            )
+        )
+        ensure_check_columns(
+            connection,
+            [name[len(CHECK_COLUMN_PREFIX):] for name in columns if name.startswith(CHECK_COLUMN_PREFIX)],
+            table="simulations_new",
+        )
+        connection.execute(
+            f"INSERT INTO simulations_new ({', '.join(copy_columns + [TENTATIVE_COLUMN])}) "
+            f"SELECT {', '.join(copy_columns)}, {tentative_sql} FROM simulations"
+        )
+        connection.execute("DROP TABLE simulations")
+        connection.execute("ALTER TABLE simulations_new RENAME TO simulations")
+        connection.executescript(_base_schema())
+        connection.commit()
+    finally:
+        connection.execute("PRAGMA foreign_keys = ON")
+    return True
+
+
+def ensure_check_columns(
+    connection: sqlite3.Connection, names: Iterable[str], *, table: str = "simulations"
+) -> list[str]:
     """Add one column per newly seen submission check. Idempotent."""
-    existing = {row["name"] for row in connection.execute("PRAGMA table_info(simulations)")}
+    existing = {row["name"] for row in connection.execute(f"PRAGMA table_info({table})")}
     added: list[str] = []
     for name in names:
         column = check_column(name)
         if column in existing:
             continue
-        connection.execute(f"ALTER TABLE simulations ADD COLUMN {column} TEXT")
+        connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} TEXT")
         existing.add(column)
         added.append(column)
     if added:
@@ -205,6 +284,22 @@ def check_values(alpha: Mapping[str, Any] | None) -> dict[str, str]:
             result if result in CHECK_RESULTS else "UNKNOWN"
         )
     return values
+
+
+def tentative_submittable(checks: Mapping[str, str]) -> int:
+    """1 when every check except self-correlation passed, else 0.
+
+    Self-correlation is only evaluated at submission time, so it must not block this
+    preliminary verdict; a missing or pending check still counts as "not passed".
+    """
+    required = {
+        column: result
+        for column, result in checks.items()
+        if column not in EXCLUDED_FROM_TENTATIVE
+    }
+    if not required:
+        return 0
+    return 1 if all(result == "PASS" for result in required.values()) else 0
 
 
 def derive_submittable(alpha: Mapping[str, Any] | None) -> tuple[int | None, list[dict[str, Any]]]:
@@ -245,9 +340,11 @@ def build_rows(
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Build the main row and its side-table row for one backtest."""
     block = _is_block(alpha_body)
+    checks = check_values(alpha_body)
     main: dict[str, Any] = {
         "sim_uid": sim_uid,
         "expression": expression,
+        TENTATIVE_COLUMN: tentative_submittable(checks),
         "settings_json": json.dumps(settings, ensure_ascii=False, sort_keys=True),
         "completed": 1 if completed else 0,
         "simulated_at": simulated_at,
@@ -261,7 +358,7 @@ def build_rows(
             main[column] = value
         else:
             main[column] = None
-    main.update(check_values(alpha_body))
+    main.update(checks)
 
     known_sources = {source for _, source, _ in IS_METRICS}
     extra_is = {k: v for k, v in block.items() if k not in known_sources and k != "checks"}
