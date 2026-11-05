@@ -145,7 +145,10 @@ def main(argv: list[str] | None = None) -> int:
         )
         print(f"inserted {inserted} alphas into {args.db} (run_id={run_id})")
         for row in storage.summary(connection):
-            print(f"  {row['template_id']:<38} {row['alphas']:>6} alphas")
+            print(
+                f"  {row['template_id']:<38} {row['alphas']:>6} alphas "
+                f"({row['simulated']} simulated)"
+            )
     finally:
         connection.close()
 

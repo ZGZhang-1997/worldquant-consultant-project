@@ -1,4 +1,9 @@
-"""Persistence for generated alphas: ``data/alpha.db`` with alphas + alpha_slots."""
+"""Persistence for generated alphas: ``data/alpha.db``.
+
+``alphas``        the lean table: uid, expression and the backtest markers.
+``alpha_details`` 1:1 side table with template, dedupe hash and batch metadata.
+``alpha_slots``   one row per filled slot (field provenance).
+"""
 
 from __future__ import annotations
 
@@ -14,27 +19,32 @@ from .generator import GeneratedAlpha
 
 DEFAULT_DB_PATH = DEFAULT_DATA_DIR / "alpha.db"
 
-SCHEMA = """
-PRAGMA foreign_keys = ON;
+_ALPHAS_TABLE = """
+CREATE TABLE IF NOT EXISTS {table} (
+    alpha_uid    TEXT PRIMARY KEY,
+    expression   TEXT NOT NULL,
+    simulated    INTEGER,
+    simulated_at TEXT
+);
+"""
 
-CREATE TABLE IF NOT EXISTS alphas (
+_DETAILS_TABLE = """
+CREATE TABLE IF NOT EXISTS alpha_details (
     alpha_uid        TEXT PRIMARY KEY,
     template_id      TEXT NOT NULL,
     template_name    TEXT,
-    expression       TEXT NOT NULL,
     expression_hash  TEXT NOT NULL UNIQUE,
     slot_count       INTEGER NOT NULL,
     formula_pattern  TEXT NOT NULL,
     label_source     TEXT NOT NULL,
     slot_fill_json   TEXT NOT NULL,
     run_id           TEXT NOT NULL,
-    generated_at     TEXT NOT NULL
+    generated_at     TEXT NOT NULL,
+    FOREIGN KEY (alpha_uid) REFERENCES alphas (alpha_uid) ON DELETE CASCADE
 );
+"""
 
-CREATE INDEX IF NOT EXISTS idx_alphas_template ON alphas (template_id);
-CREATE INDEX IF NOT EXISTS idx_alphas_run      ON alphas (run_id);
-CREATE INDEX IF NOT EXISTS idx_alphas_created  ON alphas (generated_at);
-
+_SLOTS_TABLE = """
 CREATE TABLE IF NOT EXISTS alpha_slots (
     alpha_uid         TEXT NOT NULL,
     slot_name         TEXT NOT NULL,
@@ -48,26 +58,84 @@ CREATE TABLE IF NOT EXISTS alpha_slots (
     PRIMARY KEY (alpha_uid, slot_name),
     FOREIGN KEY (alpha_uid) REFERENCES alphas (alpha_uid) ON DELETE CASCADE
 );
+"""
 
-CREATE INDEX IF NOT EXISTS idx_alpha_slots_field ON alpha_slots (field_id);
+_INDEXES_AND_VIEW = """
+CREATE INDEX IF NOT EXISTS idx_alphas_simulated   ON alphas (simulated);
+CREATE INDEX IF NOT EXISTS idx_details_template   ON alpha_details (template_id);
+CREATE INDEX IF NOT EXISTS idx_details_run        ON alpha_details (run_id);
+CREATE INDEX IF NOT EXISTS idx_details_created    ON alpha_details (generated_at);
+CREATE INDEX IF NOT EXISTS idx_alpha_slots_field  ON alpha_slots (field_id);
 
 DROP VIEW IF EXISTS v_alpha_expressions;
 CREATE VIEW v_alpha_expressions AS
-SELECT alpha_uid,
-       template_id,
-       template_name,
-       expression,
-       slot_count,
-       label_source,
-       run_id,
-       generated_at
-FROM alphas
-ORDER BY template_id, alpha_uid;
+SELECT a.alpha_uid,
+       a.expression,
+       a.simulated,
+       a.simulated_at,
+       d.template_id,
+       d.template_name,
+       d.slot_count,
+       d.label_source,
+       d.run_id,
+       d.generated_at
+FROM alphas AS a
+LEFT JOIN alpha_details AS d ON d.alpha_uid = a.alpha_uid
+ORDER BY d.template_id, a.alpha_uid;
 """
+
+SCHEMA = (
+    _ALPHAS_TABLE.format(table="alphas") + _DETAILS_TABLE + _SLOTS_TABLE + _INDEXES_AND_VIEW
+)
 
 
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def _needs_migration(connection: sqlite3.Connection) -> bool:
+    """The first layout kept every template column inside ``alphas``."""
+    columns = {row["name"] for row in connection.execute("PRAGMA table_info(alphas)")}
+    return bool(columns) and "template_id" in columns
+
+
+def _migrate_wide_alphas(connection: sqlite3.Connection) -> bool:
+    """Split the old wide ``alphas`` table into ``alphas`` + ``alpha_details``."""
+    if not _needs_migration(connection):
+        return False
+
+    connection.commit()
+    connection.execute("PRAGMA foreign_keys = OFF")
+    try:
+        connection.executescript(
+            "DROP VIEW IF EXISTS v_alpha_expressions;"
+            "DROP TABLE IF EXISTS alphas_new;"
+            "DROP TABLE IF EXISTS alpha_details;"
+        )
+        connection.executescript(_ALPHAS_TABLE.format(table="alphas_new"))
+        connection.executescript(_DETAILS_TABLE)
+        # Both markers stay NULL until the alpha is actually backtested.
+        connection.execute(
+            "INSERT INTO alphas_new (alpha_uid, expression) SELECT alpha_uid, expression FROM alphas"
+        )
+        connection.execute(
+            """
+            INSERT INTO alpha_details (
+                alpha_uid, template_id, template_name, expression_hash, slot_count,
+                formula_pattern, label_source, slot_fill_json, run_id, generated_at
+            )
+            SELECT alpha_uid, template_id, template_name, expression_hash, slot_count,
+                   formula_pattern, label_source, slot_fill_json, run_id, generated_at
+            FROM alphas
+            """
+        )
+        connection.execute("DROP TABLE alphas")
+        connection.execute("ALTER TABLE alphas_new RENAME TO alphas")
+        connection.executescript(_INDEXES_AND_VIEW)
+        connection.commit()
+    finally:
+        connection.execute("PRAGMA foreign_keys = ON")
+    return True
 
 
 def connect(path: Path | str | None = None) -> sqlite3.Connection:
@@ -77,8 +145,9 @@ def connect(path: Path | str | None = None) -> sqlite3.Connection:
     connection.row_factory = sqlite3.Row
     connection.execute("PRAGMA journal_mode = WAL")
     connection.execute("PRAGMA foreign_keys = ON")
-    connection.executescript(SCHEMA)
-    connection.commit()
+    if not _migrate_wide_alphas(connection):
+        connection.executescript(SCHEMA)
+        connection.commit()
     return connection
 
 
@@ -95,7 +164,8 @@ def exists(connection: sqlite3.Connection, hashes: Sequence[str]) -> set[str]:
     for start in range(0, len(hashes), chunk):
         batch = hashes[start : start + chunk]
         rows = connection.execute(
-            f"SELECT expression_hash FROM alphas WHERE expression_hash IN ({','.join('?' * len(batch))})",
+            f"SELECT expression_hash FROM alpha_details "
+            f"WHERE expression_hash IN ({','.join('?' * len(batch))})",
             batch,
         )
         found.update(row[0] for row in rows)
@@ -109,19 +179,20 @@ def save(
     label_source: str,
     run_id: str,
 ) -> int:
-    """Insert alphas plus their slot rows. Returns the number of alphas inserted."""
+    """Insert alphas, their details and slot rows. Returns the number of alphas inserted."""
     generated_at = utc_now()
-    alpha_rows: list[tuple] = []
+    core_rows: list[tuple] = []
+    detail_rows: list[tuple] = []
     slot_rows: list[tuple] = []
 
     for alpha in alphas:
         alpha_uid = uuid.uuid4().hex
-        alpha_rows.append(
+        core_rows.append((alpha_uid, alpha.expression, None, None))
+        detail_rows.append(
             (
                 alpha_uid,
                 alpha.template.template_id,
                 alpha.template.template_name,
-                alpha.expression,
                 alpha.expression_hash,
                 alpha.template.slot_count,
                 alpha.template.formula_pattern,
@@ -146,18 +217,22 @@ def save(
                 )
             )
 
-    if not alpha_rows:
+    if not core_rows:
         return 0
 
     try:
         connection.executemany(
+            "INSERT INTO alphas (alpha_uid, expression, simulated, simulated_at) VALUES (?, ?, ?, ?)",
+            core_rows,
+        )
+        connection.executemany(
             """
-            INSERT INTO alphas (
-                alpha_uid, template_id, template_name, expression, expression_hash,
-                slot_count, formula_pattern, label_source, slot_fill_json, run_id, generated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO alpha_details (
+                alpha_uid, template_id, template_name, expression_hash, slot_count,
+                formula_pattern, label_source, slot_fill_json, run_id, generated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            alpha_rows,
+            detail_rows,
         )
         connection.executemany(
             """
@@ -172,11 +247,12 @@ def save(
         connection.rollback()
         raise
     connection.commit()
-    return len(alpha_rows)
+    return len(core_rows)
 
 
 def clear(connection: sqlite3.Connection) -> None:
     connection.execute("DELETE FROM alpha_slots")
+    connection.execute("DELETE FROM alpha_details")
     connection.execute("DELETE FROM alphas")
     connection.commit()
 
@@ -185,13 +261,15 @@ def summary(connection: sqlite3.Connection) -> list[sqlite3.Row]:
     return list(
         connection.execute(
             """
-            SELECT template_id,
+            SELECT d.template_id,
                    COUNT(*) AS alphas,
-                   COUNT(DISTINCT run_id) AS runs,
-                   MIN(generated_at) AS first_generated
-            FROM alphas
-            GROUP BY template_id
-            ORDER BY template_id
+                   SUM(CASE WHEN a.simulated IS NOT NULL THEN 1 ELSE 0 END) AS simulated,
+                   COUNT(DISTINCT d.run_id) AS runs,
+                   MIN(d.generated_at) AS first_generated
+            FROM alphas AS a
+            JOIN alpha_details AS d ON d.alpha_uid = a.alpha_uid
+            GROUP BY d.template_id
+            ORDER BY d.template_id
             """
         )
     )
