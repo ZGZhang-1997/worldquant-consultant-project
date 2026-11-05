@@ -200,7 +200,7 @@ uv run python -m worldquant_consultant_project.simulation --expression "rank(ts_
 |---|---|
 | `sim_uid` | 回测 id（主键） |
 | `expression` | 因子表达式 |
-| `tentative_submittable` | 初判可提交（1/0）：除 `check_self_correlation` 外的检查全部 `PASS` 才是 1 |
+| `tentative_submittable` | 初判可提交（1/0）：其他检查全部 `PASS`，且 `SELF_CORRELATION` 为 `PASS` 或 `PENDING`（只有它为 `FAIL` 才算不通过） |
 | `settings_json` | 回测设置整包 JSON（universe / delay / decay / neutralization / truncation … 不再拆列） |
 | `completed` | 是否跑完（1/0） |
 | `simulated_at` | 回测开始运行的时间（不是提交 alpha 的时间） |
@@ -227,9 +227,13 @@ uv run python -m worldquant_consultant_project.simulation --expression "rank(ts_
 
 BRAIN 的 `/alphas/{id}` 响应里**没有**「能否提交」字段，提交资格完全由 `is.checks[]` 决定。
 
-`tentative_submittable` 是回测后即可得到的初判：**除 `check_self_correlation` 之外的 7 个检查
-全部为 `PASS` 时才记 1**，否则记 0。之所以排除自相关，是因为它要等到真正提交时才计算，
-未算完会一直显示 `PENDING`，不应作为回测阶段的淘汰依据。
+`tentative_submittable` 是回测后即可得到的初判：
+
+- 其余 7 项检查必须全部为 `PASS`
+- `SELF_CORRELATION` 为 `PASS` **或 `PENDING`** 都可以接受（提交前通常一直是 `PENDING`）
+- 只有 `SELF_CORRELATION` 已经明确为 `FAIL` 时，该列才记 0
+
+即：`其他检查全 PASS 且 SELF_CORRELATION != FAIL` → 1，否则 0。失败的回测（没有任何检查数据）记 0。
 
 需要更严格的完整判定（含自相关）时，直接查检查列：
 

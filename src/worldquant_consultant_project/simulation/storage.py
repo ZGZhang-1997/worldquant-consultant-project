@@ -13,7 +13,7 @@ import re
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable, Mapping
+from typing import Any, Iterable, Mapping, Sequence
 
 # In-sample metric columns: ``<column>`` holds ``is.<source>``.
 IS_METRICS: tuple[tuple[str, str, str], ...] = (
@@ -36,10 +36,12 @@ OTHER_SAMPLES: tuple[str, ...] = ("os", "train", "test", "prod")
 CHECK_COLUMN_PREFIX = "check_"
 CHECK_RESULTS = ("PASS", "FAIL", "PENDING")
 
-# Self-correlation is only computed at submission time, so it is excluded from the
-# "would pass everything else" verdict.
-EXCLUDED_FROM_TENTATIVE = ("check_self_correlation",)
+# Self-correlation is normally PENDING until submission, so only an explicit FAIL blocks
+# the preliminary verdict; it is tolerated rather than required.
+TOLERATED_CHECKS = ("check_self_correlation",)
 TENTATIVE_COLUMN = "tentative_submittable"
+# Bumped whenever the tentative rule changes so existing rows get recomputed.
+TENTATIVE_RULE_VERSION = "2"
 
 MAIN_COLUMNS: tuple[str, ...] = (
     "sim_uid",
@@ -94,6 +96,11 @@ CREATE TABLE IF NOT EXISTS simulation_details (
 """
 
 _INDEXES_AND_VIEW = """
+CREATE TABLE IF NOT EXISTS schema_meta (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_simulations_simulated ON simulations (simulated_at);
 CREATE INDEX IF NOT EXISTS idx_details_alpha ON simulation_details (alpha_id);
 
@@ -176,8 +183,32 @@ def connect(path: Path | str) -> sqlite3.Connection:
     # The view references tentative_submittable, so any table rebuild must happen first.
     if not _insert_tentative_column(connection):
         connection.executescript(_base_schema())
+    _refresh_tentative(connection)
     connection.commit()
     return connection
+
+
+def _refresh_tentative(connection: sqlite3.Connection) -> int:
+    """Recompute ``tentative_submittable`` when the rule changed since the rows were written."""
+    row = connection.execute(
+        "SELECT value FROM schema_meta WHERE key = 'tentative_rule'"
+    ).fetchone()
+    if row is not None and row[0] == TENTATIVE_RULE_VERSION:
+        return 0
+
+    columns = [item["name"] for item in connection.execute("PRAGMA table_info(simulations)")]
+    if not columns:
+        return 0
+    updated = connection.execute(
+        f"UPDATE simulations SET {TENTATIVE_COLUMN} = {_tentative_sql(columns)}"
+    ).rowcount
+    connection.execute(
+        "INSERT INTO schema_meta (key, value) VALUES ('tentative_rule', ?) "
+        "ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+        (TENTATIVE_RULE_VERSION,),
+    )
+    connection.commit()
+    return updated
 
 
 def _insert_tentative_column(connection: sqlite3.Connection) -> bool:
@@ -191,22 +222,13 @@ def _insert_tentative_column(connection: sqlite3.Connection) -> bool:
         return False
 
     existing = set(columns)
-    check_columns = [
-        name
-        for name in columns
-        if name.startswith(CHECK_COLUMN_PREFIX) and name not in EXCLUDED_FROM_TENTATIVE
-    ]
     all_check_columns = [name for name in columns if name.startswith(CHECK_COLUMN_PREFIX)]
     copy_columns = [
         name
         for name in MAIN_COLUMNS + tuple(all_check_columns)
         if name != TENTATIVE_COLUMN and name in existing
     ]
-    if check_columns:
-        condition = " AND ".join(f"COALESCE({name}, '') = 'PASS'" for name in check_columns)
-        tentative_sql = f"CASE WHEN {condition} THEN 1 ELSE 0 END"
-    else:
-        tentative_sql = "0"
+    tentative_sql = _tentative_sql(all_check_columns)
 
     connection.commit()
     connection.execute("PRAGMA foreign_keys = OFF")
@@ -287,19 +309,34 @@ def check_values(alpha: Mapping[str, Any] | None) -> dict[str, str]:
 
 
 def tentative_submittable(checks: Mapping[str, str]) -> int:
-    """1 when every check except self-correlation passed, else 0.
+    """1 when the other checks all passed and self-correlation did not fail.
 
-    Self-correlation is only evaluated at submission time, so it must not block this
-    preliminary verdict; a missing or pending check still counts as "not passed".
+    Self-correlation usually stays ``PENDING`` until the alpha is submitted, so both
+    ``PASS`` and ``PENDING`` (or missing) are acceptable; only an explicit ``FAIL`` blocks.
+    Any other check must be ``PASS``.
     """
-    required = {
-        column: result
-        for column, result in checks.items()
-        if column not in EXCLUDED_FROM_TENTATIVE
-    }
-    if not required:
+    if not checks:
         return 0
-    return 1 if all(result == "PASS" for result in required.values()) else 0
+    for column, result in checks.items():
+        if column in TOLERATED_CHECKS:
+            if result == "FAIL":
+                return 0
+        elif result != "PASS":
+            return 0
+    return 1
+
+
+def _tentative_sql(check_columns: Sequence[str]) -> str:
+    """SQL equivalent of :func:`tentative_submittable` over table columns."""
+    checks = [name for name in check_columns if name.startswith(CHECK_COLUMN_PREFIX)]
+    if not checks:
+        return "0"
+    required = [name for name in checks if name not in TOLERATED_CHECKS]
+    tolerated = [name for name in checks if name in TOLERATED_CHECKS]
+    conditions = [f"COALESCE({name}, '') = 'PASS'" for name in required]
+    conditions += [f"COALESCE({name}, '') != 'FAIL'" for name in tolerated]
+    any_present = " OR ".join(f"{name} IS NOT NULL" for name in checks)
+    return f"CASE WHEN ({' AND '.join(conditions)}) AND ({any_present}) THEN 1 ELSE 0 END"
 
 
 def derive_submittable(alpha: Mapping[str, Any] | None) -> tuple[int | None, list[dict[str, Any]]]:
