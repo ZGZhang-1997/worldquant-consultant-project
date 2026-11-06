@@ -514,6 +514,32 @@ def recent(connection: sqlite3.Connection, limit: int = 10) -> list[sqlite3.Row]
     )
 
 
+def pending_placeholders(connection: sqlite3.Connection) -> list[sqlite3.Row]:
+    """Rows written at submit time whose final result was never stored.
+
+    This happens when the process is stopped while the platform is still computing:
+    the row keeps ``braint_sim_id`` but has no error, result or completion time.
+    """
+    return list(
+        connection.execute(
+            """
+            SELECT s.sim_uid,
+                   s.expression,
+                   s.settings_json,
+                   s.simulated_at,
+                   d.braint_sim_id
+            FROM simulations AS s
+            JOIN simulation_details AS d ON d.sim_uid = s.sim_uid
+            WHERE s.completed = 0
+              AND d.error IS NULL
+              AND d.finished_at IS NULL
+              AND d.braint_sim_id IS NOT NULL
+            ORDER BY s.simulated_at
+            """
+        )
+    )
+
+
 def _dump(value: Any) -> str | None:
     if value is None:
         return None

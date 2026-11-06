@@ -213,8 +213,28 @@ uv run python -m worldquant_consultant_project.simulation.batch --limit 20  # �
 | `--limit N` | 只回测 N 个 |
 | `--timeout` / `--progress-every` | 单条轮询超时（默认 900s）/ 进度日志间隔 |
 | `--dry-run` | 只统计待回测数量 |
+| `--reconcile-only` | 只收尾「已提交但未记录结果」的行，然后退出 |
+| `--no-reconcile` | 跳过启动时的自动收尾 |
+| `--stale-minutes` | 平台一直不给结果时，超过多少分钟判为中断（默认 30） |
 
 退出码：`0` 全部成功；`2` 配置/鉴权失败；`3` 存在失败因子（失败记录已入库，可据此排查）。
+
+### 中断行自动收尾（reconcile）
+
+批量运行被中途停掉（Ctrl+C、关终端、机器休眠）时，已提交的模拟会留下「占位行」：
+`completed=0`、无 `error`、无 `finished_at`、无 IS 指标，但 `braint_sim_id` 有值。
+每次批量启动（以及 `--reconcile-only`）会先把这些行收尾：
+
+| 平台状态 | 处理 |
+|---|---|
+| 已完成 | 拉取 alpha 指标补写结果，`completed=1` |
+| 报错 | 写入平台错误信息，`completed=0` + `error` |
+| 平台已无此 id（404） | 标记 `error="interrupted: simulation no longer exists on the platform"` |
+| 仍在计算（响应带 `Retry-After`） | 保留，下次再收尾 |
+| 只回进度且已超 `--stale-minutes` | 判定为停滞，标记 `error="interrupted: stalled..."` |
+
+收尾成功的因子同时会在 `alpha.db` 里标记 `simulated=1`，避免重复提交。注意：若某条模拟在
+本地被中断后仍在平台计算，而 `alpha.db` 已把它当作待回测，下一批会重新提交一次（少量额度浪费）。
 
 ### 库表结构（`data/simulations.db`）
 

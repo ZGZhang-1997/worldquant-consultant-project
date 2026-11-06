@@ -193,6 +193,30 @@ class BrainSimulationClient:
             return body
         return last
 
+    def simulation_snapshot(self, sim_id: str) -> dict[str, Any] | None:
+        """One non-blocking look at a submitted simulation.
+
+        Returns ``None`` when the platform no longer knows the id (404), otherwise the
+        body with ``finished`` added: True once the platform stopped computing, False
+        while ``Retry-After`` still asks us to wait.
+        """
+        self.authenticate()
+        try:
+            response = self._get_with_auth_retry(f"{self.base_url}/simulations/{sim_id}")
+        except BrainSimulationError as exc:
+            if exc.status_code in (404, 403):
+                return None
+            raise
+        body = _json_or_empty(response)
+        status = str(body.get("status") or "").upper()
+        retry_after = response.headers.get("Retry-After")
+        finished = not retry_after and status not in ("", "PENDING", "RUNNING")
+        body["finished"] = finished
+        # Only a Retry-After means the platform is actively working on it; a bare
+        # ``{"progress": x}`` reply can also mean an abandoned simulation.
+        body["waiting"] = bool(retry_after)
+        return body
+
     # --------------------------------------------------------------- helpers
 
     def _request(self, method: str, path: str, **kwargs: Any) -> requests.Response:

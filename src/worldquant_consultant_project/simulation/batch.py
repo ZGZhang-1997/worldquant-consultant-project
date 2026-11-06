@@ -9,6 +9,7 @@ settings overwrites the previous row instead of adding a new one.
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import sqlite3
 import sys
@@ -16,7 +17,7 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable, Sequence
 
@@ -59,6 +60,19 @@ class BatchStats:
     failures: list[tuple[str, str]] = field(default_factory=list)
 
 
+@dataclass
+class ReconcileStats:
+    """Outcome of finalising rows left behind by an interrupted run."""
+
+    checked: int = 0
+    recovered: int = 0
+    failed: int = 0
+    still_running: int = 0
+    missing: int = 0
+    # Expressions whose outcome is now known, so alpha.db can mark them as backtested.
+    resolved_expressions: list[str] = field(default_factory=list)
+
+
 def load_pending_alphas(
     alpha_db: Path | str, *, limit: int | None = None
 ) -> list[PendingAlpha]:
@@ -82,6 +96,19 @@ def load_pending_alphas(
         connection.close()
 
 
+def _age_seconds(simulated_at: str | None) -> float:
+    """Seconds since the row's start timestamp; 0 when it cannot be parsed."""
+    if not simulated_at:
+        return 0.0
+    try:
+        started = datetime.fromisoformat(simulated_at)
+    except ValueError:
+        return 0.0
+    if started.tzinfo is None:
+        started = started.replace(tzinfo=timezone.utc)
+    return max((datetime.now(timezone.utc) - started).total_seconds(), 0.0)
+
+
 def mark_simulated(alpha_db: Path | str, alpha_uids: Iterable[str], when: str | None = None) -> int:
     """Flag alphas as backtested (any attempt, successful or not)."""
     uids = list(alpha_uids)
@@ -97,6 +124,36 @@ def mark_simulated(alpha_db: Path | str, alpha_uids: Iterable[str], when: str | 
             cursor = connection.execute(
                 f"UPDATE alphas SET simulated = 1, simulated_at = ? "
                 f"WHERE alpha_uid IN ({','.join('?' * len(batch))}) AND simulated IS NULL",
+                [timestamp, *batch],
+            )
+            updated += cursor.rowcount
+        connection.commit()
+        return updated
+    finally:
+        connection.close()
+
+
+def mark_simulated_by_expression(
+    alpha_db: Path | str, expressions: Iterable[str], when: str | None = None
+) -> int:
+    """Flag alphas as backtested using their expression text.
+
+    Recovered runs are keyed by expression because the leftover row only stores the
+    expression, not the alpha uid.
+    """
+    unique = [text for text in dict.fromkeys(expressions) if text]
+    if not unique:
+        return 0
+    connection = sqlite3.connect(str(alpha_db), timeout=60.0)
+    try:
+        connection.execute("PRAGMA busy_timeout = 60000")
+        timestamp = when or storage.utc_now()
+        updated = 0
+        for start in range(0, len(unique), 200):
+            batch = unique[start : start + 200]
+            cursor = connection.execute(
+                f"UPDATE alphas SET simulated = 1, simulated_at = ? "
+                f"WHERE simulated IS NULL AND expression IN ({','.join('?' * len(batch))})",
                 [timestamp, *batch],
             )
             updated += cursor.rowcount
@@ -136,6 +193,131 @@ class _ClientPool:
             clients, self._all = self._all, []
         for client in clients:
             client.close()
+
+
+def reconcile_interrupted(
+    connection: sqlite3.Connection,
+    client: BrainSimulationClient,
+    *,
+    stale_after_seconds: float = 1800.0,
+) -> ReconcileStats:
+    """Finalise rows created at submit time whose result was never recorded.
+
+    Such a row appears when the process stops while the platform is still computing.
+    The platform keeps the simulation, so the id is polled once here: finished runs get
+    their results (or error) written, ids the platform no longer knows are flagged as
+    interrupted, and runs still in flight are left for the next pass.
+    """
+    stats = ReconcileStats()
+    rows = storage.pending_placeholders(connection)
+    if not rows:
+        return stats
+
+    logger.info("reconciling %d row(s) left by an interrupted run", len(rows))
+    for row in rows:
+        stats.checked += 1
+        sim_uid = row["sim_uid"]
+        sim_id = row["braint_sim_id"]
+        settings = json.loads(row["settings_json"])
+        base = {
+            "sim_uid": sim_uid,
+            "expression": row["expression"],
+            "settings": settings,
+            "simulated_at": row["simulated_at"],
+            "braint_sim_id": sim_id,
+        }
+        try:
+            body = client.simulation_snapshot(sim_id)
+        except BrainSimulationError as exc:
+            logger.warning("cannot check %s (%s): %s", sim_id, sim_uid, exc)
+            continue
+
+        if body is None:
+            stats.missing += 1
+            stats.resolved_expressions.append(row["expression"])
+            storage.write_outcome(
+                connection,
+                **base,
+                completed=False,
+                error="interrupted: simulation no longer exists on the platform",
+                finished_at=storage.utc_now(),
+            )
+            logger.info("%s: id unknown to the platform, marked interrupted", sim_uid)
+            continue
+
+        status = str(body.get("status") or "").upper()
+        if status in ("ERROR", "FAIL", "FAILED"):
+            stats.failed += 1
+            stats.resolved_expressions.append(row["expression"])
+            storage.write_outcome(
+                connection,
+                **base,
+                completed=False,
+                error=str(body.get("message") or status)[:1000],
+                simulation_body=body,
+                finished_at=storage.utc_now(),
+            )
+            logger.info("%s: platform reported %s", sim_uid, status)
+            continue
+
+        if not body.get("finished"):
+            if body.get("waiting") or _age_seconds(row["simulated_at"]) < stale_after_seconds:
+                stats.still_running += 1
+                logger.info("%s: still running on the platform, left for the next pass", sim_uid)
+                continue
+            # No Retry-After and long past the grace window: the platform abandoned it.
+            stats.missing += 1
+            stats.resolved_expressions.append(row["expression"])
+            progress = body.get("progress")
+            detail = f"progress={progress}" if progress is not None else "no progress reported"
+            storage.write_outcome(
+                connection,
+                **base,
+                completed=False,
+                error=f"interrupted: stalled on the platform ({detail})",
+                simulation_body=body,
+                finished_at=storage.utc_now(),
+            )
+            logger.info("%s: stalled (%s), marked interrupted", sim_uid, detail)
+            continue
+
+        alpha_id = body.get("alpha")
+        if not alpha_id:
+            stats.missing += 1
+            stats.resolved_expressions.append(row["expression"])
+            storage.write_outcome(
+                connection,
+                **base,
+                completed=False,
+                error="interrupted: simulation finished without an alpha id",
+                simulation_body=body,
+                finished_at=storage.utc_now(),
+            )
+            continue
+
+        alpha_body = client.get_alpha(str(alpha_id))
+        storage.write_outcome(
+            connection,
+            **base,
+            completed=True,
+            alpha_id=str(alpha_id),
+            finished_at=storage.utc_now(),
+            simulation_body=body,
+            alpha_body=alpha_body,
+        )
+        stats.recovered += 1
+        stats.resolved_expressions.append(row["expression"])
+        logger.info("%s: recovered result for alpha %s", sim_uid, alpha_id)
+
+    logger.info(
+        "reconcile done: checked=%d recovered=%d failed=%d missing=%d running=%d",
+        stats.checked,
+        stats.recovered,
+        stats.failed,
+        stats.missing,
+        stats.still_running,
+    )
+    return stats
 
 
 def run_batch(
@@ -259,9 +441,53 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--credentials", type=Path, default=None)
     parser.add_argument("--progress-every", type=int, default=10)
     parser.add_argument("--dry-run", action="store_true", help="report the pending count and exit")
+    parser.add_argument(
+        "--reconcile-only",
+        action="store_true",
+        help="only finalise rows left by an interrupted run, then exit",
+    )
+    parser.add_argument(
+        "--no-reconcile",
+        action="store_true",
+        help="skip finalising rows left by an interrupted run",
+    )
+    parser.add_argument(
+        "--stale-minutes",
+        type=float,
+        default=30.0,
+        help="age after which an unanswered simulation counts as interrupted (default 30)",
+    )
     parser.add_argument("--log-dir", type=Path, default=DEFAULT_LOG_DIR)
     parser.add_argument("--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR"])
     return parser
+
+
+def _run_reconcile(args: argparse.Namespace) -> ReconcileStats | None:
+    """Open both databases and finalise rows left by an interrupted run."""
+    try:
+        credentials = load_credentials(args.credentials)
+    except CredentialsError as exc:
+        logger.error("%s", exc)
+        return None
+
+    storage.connect(args.db).close()
+    connection = storage.connect(args.db, initialize=False)
+    client = BrainSimulationClient(credentials)
+    try:
+        stats = reconcile_interrupted(
+            connection, client, stale_after_seconds=max(args.stale_minutes, 0) * 60
+        )
+    except BrainSimulationError as exc:
+        logger.error("cannot reconcile interrupted rows: %s", exc)
+        return None
+    finally:
+        client.close()
+        connection.close()
+
+    marked = mark_simulated_by_expression(args.alpha_db, stats.resolved_expressions)
+    if marked:
+        logger.info("marked %d alpha(s) as backtested after reconciliation", marked)
+    return stats
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -293,6 +519,7 @@ def main(argv: list[str] | None = None) -> int:
         len(pending),
         args.db,
     )
+
     if args.dry_run:
         print(f"pending alphas: {len(pending)}")
         for alpha in pending[:5]:
@@ -300,6 +527,25 @@ def main(argv: list[str] | None = None) -> int:
         if len(pending) > 5:
             print(f"  ... and {len(pending) - 5} more")
         return EXIT_OK
+
+    reconcile = not args.no_reconcile
+    if reconcile or args.reconcile_only:
+        stats_reconcile = _run_reconcile(args)
+        if stats_reconcile is None:
+            return EXIT_CONFIG
+        print(
+            f"reconciled interrupted rows: checked={stats_reconcile.checked} "
+            f"recovered={stats_reconcile.recovered} failed={stats_reconcile.failed} "
+            f"missing={stats_reconcile.missing} running={stats_reconcile.still_running}"
+        )
+        if args.reconcile_only:
+            return EXIT_OK
+        # Results recovered above may complete alphas that are still marked pending.
+        try:
+            pending = load_pending_alphas(args.alpha_db, limit=args.limit)
+        except FileNotFoundError as exc:
+            logger.error("%s", exc)
+            return EXIT_CONFIG
 
     if not pending:
         print("nothing to backtest")
