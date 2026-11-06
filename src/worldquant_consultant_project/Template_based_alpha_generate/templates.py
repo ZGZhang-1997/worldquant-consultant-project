@@ -14,6 +14,11 @@ DEFAULT_TEMPLATE_PATH = Path(__file__).with_name("Template.json")
 
 PLACEHOLDER = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)\}")
 
+# ``type`` filters on the BRAIN field type rather than on a model label, so it is
+# validated against the field types present in the catalogue instead.
+TYPE_DIMENSION = "type"
+FIELD_TYPES = ("MATRIX", "VECTOR", "GROUP", "UNIVERSE", "SYMBOL")
+
 
 class TemplateError(RuntimeError):
     """A template definition is malformed."""
@@ -54,10 +59,24 @@ def _validate_rule(template_id: str, slot: str, rule: Any) -> dict[str, list[str
         raise TemplateError(f"{template_id}: slot '{slot}' must map dimensions to value lists")
     cleaned: dict[str, list[str]] = {}
     for dimension, values in rule.items():
+        if dimension == TYPE_DIMENSION:
+            if isinstance(values, str):
+                values = [values]
+            if not isinstance(values, list) or not values:
+                raise TemplateError(f"{template_id}: slot '{slot}' type needs a list")
+            normalized = [str(value).strip().upper() for value in values]
+            invalid = [value for value in normalized if value not in FIELD_TYPES]
+            if invalid:
+                raise TemplateError(
+                    f"{template_id}: slot '{slot}' has invalid field types {invalid} "
+                    f"(allowed: {', '.join(FIELD_TYPES)})"
+                )
+            cleaned[TYPE_DIMENSION] = normalized
+            continue
         if dimension not in LABEL_DIMENSIONS:
             raise TemplateError(
                 f"{template_id}: slot '{slot}' uses unknown dimension '{dimension}' "
-                f"(allowed: {', '.join(LABEL_DIMENSIONS)})"
+                f"(allowed: {', '.join((TYPE_DIMENSION, *LABEL_DIMENSIONS))})"
             )
         if isinstance(values, str):
             values = [values]

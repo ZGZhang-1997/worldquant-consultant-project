@@ -211,8 +211,6 @@ uv run python -m worldquant_consultant_project.simulation.batch --limit 20  # �
 | `--settings` / `--concurrency-file` | 覆盖默认配置文件路径 |
 | `--workers N` | 覆盖并发数（默认读配置文件） |
 | `--limit N` | 只回测 N 个 |
-| `--brain-db` | 用于识别 VECTOR 事件字段的字段库（默认 `data/brain.db`） |
-| `--include-event-fields` | 不跳过含 VECTOR 事件字段的因子（默认跳过，避免被平台拒绝） |
 | `--timeout` / `--progress-every` | 单条轮询超时（默认 900s）/ 进度日志间隔 |
 | `--dry-run` | 只统计待回测数量 |
 
@@ -308,20 +306,10 @@ uv run python -m worldquant_consultant_project.Template_based_alpha_generate
 | `--label-source`                        | `union`（默认，所有模型标签取并集）/ `intersection` / `deepseek` / `gemini` |
 | `--template T01_Relative_Valuation,...` | 只生成指定模板                                                                      |
 | `--limit-per-template N`                | 每模板最多 N 条（调试）                                                             |
-| `--include-event-fields` | 保留 VECTOR 事件字段（默认排除，见下） |
 | `--db` / `--brain-db`                 | 输出库（默认 `data/alpha.db`）/ 字段库（默认 `data/brain.db`）                  |
 | `--dry-run` / `--clear`               | 只统计 / 生成前清空                                                                 |
 
 退出码：`0` 成功；`2` 模板或库路径问题；`3` 槽位无候选字段。
-
-### 事件字段（VECTOR）过滤
-
-BRAIN 的 `ts_delta` / `divide` / `ts_corr` / `ts_delay` 等算子**不接受事件型输入**，
-实测 410 个「does not support event inputs」失败**全部**含 VECTOR 字段，而 145 个成功的一个都没有。
-因此：
-
-- 生成阶段默认**排除 `type = 'VECTOR'` 的字段**（组合数 29,680 → 7,471），`--include-event-fields` 可关闭该过滤
-- 回测阶段默认**跳过**表达式里引用了 VECTOR 字段的因子，不消耗平台额度；`--include-event-fields` 可关闭
 
 ### 标签来源（并集，且自动适配新模型）
 
@@ -330,7 +318,7 @@ BRAIN 的 `ts_delta` / `divide` / `ts_corr` / `ts_delay` 等算子**不接受事
 **各自求槽位字段集后取并集**。以后新增模型只需在该注册表登记并跑完打标签，
 生成器会自动纳入，无需改代码。
 
-实测组合数（排除事件字段后）：`union` 7,471；含事件字段时 `union` 29,680、`deepseek` 8,753、`intersection` 7,496。
+实测组合数（含 `type` 筛选）：6 个模板共 **7,672** 条（T01 522 / T02 1,965 / T03 4,725 / T04 183 / T05 76 / T06 201）。
 
 ### 库表结构（`data/alpha.db`）
 
@@ -360,6 +348,7 @@ SELECT alpha_uid, expression FROM alphas WHERE simulated IS NULL;
   "formula_pattern": "group_rank(ts_delta({Slot_Expectation}, 20), subindustry)",
   "slots": {
     "Slot_Expectation": {
+      "type": ["MATRIX"],
       "category": ["analyst"],
       "math_dimension": ["price_level", "ratio_relative", "score_bounded"],
       "polarity": ["positive"],
@@ -370,5 +359,8 @@ SELECT alpha_uid, expression FROM alphas WHERE simulated IS NULL;
 }
 ```
 
+- `type` 是**字段数据类型**筛选（不是模型标签），取值为 `MATRIX` / `VECTOR` / `GROUP` / `UNIVERSE` / `SYMBOL`，
+  小写会自动归一化为大写，非法值直接报错；它对应 `data_fields.type` 列，不参与 `<provider>_` 前缀
 - 同一模板内同一槽位可在公式中**重复出现**（如 `ts_delay({Slot_Target}, 252)`），按 `slot_count` 计为 1 个槽位
-- 校验会拦截：占位符与 `slots` 不匹配、`slot_count` 与实际占位符数不符、维度名或枚举值非法
+- 校验会拦截：占位符与 `slots` 不匹配、`slot_count` 与实际占位符数不符、维度名或枚举值非法、`type` 非法
+- 现有 6 个模板的分工：T01–T05 使用 `MATRIX` 字段；T06 专门使用 `VECTOR` 字段并通过 `vec_avg` 降维

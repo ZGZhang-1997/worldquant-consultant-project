@@ -5,7 +5,7 @@
     "region": "USA",
     "universe": "TOP3000",
     "delay": 1,
-    "decay": 4,
+    "decay": 3,
     "neutralization": "SUBINDUSTRY",
     "truncation": 0.08,
     "pasteurization": "ON",

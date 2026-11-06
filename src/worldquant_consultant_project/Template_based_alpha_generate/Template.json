@@ -7,6 +7,7 @@
     "formula_pattern": "group_rank({Slot_Numerator} / {Slot_Denominator}, subindustry)",
     "slots": {
       "Slot_Numerator": {
+        "type": ["MATRIX"],
         "category": ["fundamental"],
         "math_dimension": ["currency_flow", "currency_stock"],
         "polarity": ["positive"],
@@ -14,6 +15,7 @@
         "frequency": ["quarterly_fnd"]
       },
       "Slot_Denominator": {
+        "type": ["MATRIX"],
         "category": ["price_volume"],
         "math_dimension": ["currency_stock"],
         "polarity": ["neutral_state", "positive"],
@@ -30,6 +32,7 @@
     "formula_pattern": "group_neutralize(({Slot_Target} - ts_delay({Slot_Target}, 252)) / {Slot_Scale}, sector)",
     "slots": {
       "Slot_Target": {
+        "type": ["MATRIX"],
         "category": ["fundamental"],
         "math_dimension": ["currency_flow"],
         "polarity": ["positive"],
@@ -37,6 +40,7 @@
         "frequency": ["quarterly_fnd"]
       },
       "Slot_Scale": {
+        "type": ["MATRIX"],
         "category": ["fundamental", "price_volume"],
         "math_dimension": ["currency_stock"],
         "polarity": ["positive", "neutral_state"],
@@ -53,6 +57,7 @@
     "formula_pattern": "-ts_corr(ts_delta({Slot_Price}, 5), {Slot_Activity}, 20)",
     "slots": {
       "Slot_Price": {
+        "type": ["MATRIX"],
         "category": ["price_volume"],
         "math_dimension": ["price_level"],
         "polarity": ["neutral_state", "positive"],
@@ -60,6 +65,7 @@
         "frequency": ["daily_high"]
       },
       "Slot_Activity": {
+        "type": ["MATRIX"],
         "category": ["price_volume", "ownership_trading"],
         "math_dimension": ["volume_activity", "ratio_relative"],
         "polarity": ["neutral_state"],
@@ -71,11 +77,12 @@
   {
     "template_id": "T04_Analyst_Revision_Drift",
     "template_name": "分析师一致预期边际调升漂移模板",
-    "description": "捕捉分析师群体在近一个月内对公司业绩或估值预期的边际改善。由于市场对专业机构调级存在反应不足（Under-reaction），具有明显的后漂移超额收益。",
+    "description": "捕捉分析师群体在近一个月内对公司业绩或估值预期的边际改善。注意：此处仅接收已合并为单值的分析师一致预期矩阵（如均值/中位数）。",
     "slot_count": 1,
     "formula_pattern": "group_rank(ts_delta({Slot_Expectation}, 20), subindustry)",
     "slots": {
       "Slot_Expectation": {
+        "type": ["MATRIX"],
         "category": ["analyst"],
         "math_dimension": ["price_level", "ratio_relative", "score_bounded"],
         "polarity": ["positive"],
@@ -87,15 +94,33 @@
   {
     "template_id": "T05_Sentiment_Alternative_Shock",
     "template_name": "另类舆情与微观情绪冲击模板",
-    "description": "利用统计标准化（Z-Score）捕捉另类数据源（如新闻情绪、高管持仓、突发网络热度）的脉冲突变，并在全市场截面上做相对排序。",
+    "description": "利用统计标准化捕捉单值型另类信号源（如每日新闻综合得分、高管净持仓等）的脉冲突变，并在全市场截面上做相对排序。",
     "slot_count": 1,
     "formula_pattern": "group_rank(ts_zscore({Slot_Sentiment}, 60), market)",
     "slots": {
       "Slot_Sentiment": {
+        "type": ["MATRIX"],
         "category": ["sentiment_news", "ownership_trading", "alternative_other"],
         "math_dimension": ["score_bounded", "ratio_relative", "dimensionless_other"],
         "polarity": ["positive"],
         "domain_support": ["bounded_interval", "real_unbounded"],
+        "frequency": ["daily_high", "event_irregular"]
+      }
+    }
+  },
+  {
+    "template_id": "T06_Vector_Sentiment_Consensus_Drift",
+    "template_name": "向量型另类舆情/分析师分歧降维模板",
+    "description": "专门针对 VECTOR 类型字段。使用 vec_avg 将当天多条新闻分值或多家分析师目标价降维为单一数值矩阵，再捕捉其短周期变化率。",
+    "slot_count": 1,
+    "formula_pattern": "group_rank(ts_delta(vec_avg({Slot_Vector_Source}), 5), subindustry)",
+    "slots": {
+      "Slot_Vector_Source": {
+        "type": ["VECTOR"],
+        "category": ["sentiment_news", "analyst", "alternative_other"],
+        "math_dimension": ["score_bounded", "price_level", "ratio_relative"],
+        "polarity": ["positive"],
+        "domain_support": ["bounded_interval", "real_unbounded", "strictly_positive"],
         "frequency": ["daily_high", "event_irregular"]
       }
     }

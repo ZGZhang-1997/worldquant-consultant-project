@@ -10,6 +10,7 @@ from typing import Any
 
 from ..labeling.config import LABEL_DIMENSIONS, ProviderSpec
 from .providers import INTERSECTION, LabelSource
+from .templates import TYPE_DIMENSION
 
 logger = logging.getLogger(__name__)
 
@@ -28,20 +29,15 @@ class FieldCandidate:
         return json.dumps(self.labels, ensure_ascii=False, sort_keys=True)
 
 
-def _field_query(
-    spec: ProviderSpec,
-    rule: dict[str, list[str]],
-    exclude_types: frozenset[str] = frozenset(),
-) -> tuple[str, list[Any]]:
+def _field_query(spec: ProviderSpec, rule: dict[str, list[str]]) -> tuple[str, list[Any]]:
     select = ", ".join(f"{spec.columns[dim]} AS {dim}" for dim in LABEL_DIMENSIONS)
     conditions = []
     params: list[Any] = []
     for dimension, values in rule.items():
-        conditions.append(f"{spec.columns[dimension]} IN ({','.join('?' * len(values))})")
+        # ``type`` is a property of the field itself, not a model label.
+        column = "type" if dimension == TYPE_DIMENSION else spec.columns[dimension]
+        conditions.append(f"{column} IN ({','.join('?' * len(values))})")
         params.extend(values)
-    if exclude_types:
-        conditions.append(f"COALESCE(type, '') NOT IN ({','.join('?' * len(exclude_types))})")
-        params.extend(sorted(exclude_types))
     # Labels are per field, identical across universes, so DISTINCT collapses the 6 copies.
     sql = (
         f"SELECT DISTINCT dataset_id, field_id, description, type, {select} "
@@ -50,13 +46,8 @@ def _field_query(
     return sql, params
 
 
-def _rows_for(
-    connection: sqlite3.Connection,
-    spec: ProviderSpec,
-    rule: dict[str, list[str]],
-    exclude_types: frozenset[str] = frozenset(),
-):
-    sql, params = _field_query(spec, rule, exclude_types)
+def _rows_for(connection: sqlite3.Connection, spec: ProviderSpec, rule: dict[str, list[str]]):
+    sql, params = _field_query(spec, rule)
     return list(connection.execute(sql, params))
 
 
@@ -64,17 +55,11 @@ def select_fields(
     connection: sqlite3.Connection,
     rule: dict[str, list[str]],
     source: LabelSource,
-    *,
-    exclude_types: frozenset[str] = frozenset(),
 ) -> list[FieldCandidate]:
-    """Return every field matching ``rule`` under the configured label source.
-
-    ``exclude_types`` drops whole field types; VECTOR fields are event inputs that
-    time-series operators reject, so the generator excludes them by default.
-    """
+    """Return every field matching ``rule`` under the configured label source."""
     per_provider: dict[str, dict[str, Any]] = {}
     for spec in source.providers:
-        rows = _rows_for(connection, spec, rule, exclude_types)
+        rows = _rows_for(connection, spec, rule)
         keyed = {
             (row["dataset_id"], row["field_id"]): {
                 "row": row,
