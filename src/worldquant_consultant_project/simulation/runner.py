@@ -12,7 +12,7 @@ from typing import Any
 
 from ..acquisition.config import DEFAULT_DATA_DIR, load_credentials
 from . import storage
-from .client import BrainSimulationClient, BrainSimulationError
+from .client import BrainSimulationClient, BrainSimulationError, SimulationTimeout
 from .settings import SimulationSettings
 
 logger = logging.getLogger(__name__)
@@ -35,6 +35,9 @@ class SimulationOutcome:
     settings: dict[str, Any] = field(default_factory=dict)
     submittable: int | None = None
     submit_blockers: list[dict[str, Any]] = field(default_factory=list)
+    # Submitted, but the platform had not finished when we stopped waiting. The row is
+    # kept as a placeholder so a later reconciliation pass can still collect the result.
+    pending: bool = False
 
     @property
     def ok(self) -> bool:
@@ -126,6 +129,17 @@ def run_simulation(
         outcome.submittable = submittable
         outcome.submit_blockers = blockers
         outcome.status = "completed"
+    except SimulationTimeout as exc:
+        # The platform is still computing: keep the row as a placeholder without an error
+        # so reconciliation can collect the result instead of losing it.
+        outcome.pending = True
+        outcome.error = None
+        outcome.status = "pending"
+        logger.warning(
+            "simulation %s still running on the platform after %.0fs; left for reconciliation",
+            sim_uid,
+            timeout,
+        )
     except BrainSimulationError as exc:
         outcome.error = getattr(exc, "detail", None) or str(exc)
         logger.error("simulation failed for %r: %s", expression[:60], outcome.error)
@@ -148,7 +162,10 @@ def run_simulation(
             braint_sim_id=outcome.braint_sim_id,
             alpha_id=outcome.alpha_id,
             error=outcome.error,
-            finished_at=storage.utc_now() if outcome.ok else None,
+            # A pending run keeps finished_at empty so it still looks like a placeholder.
+            finished_at=(
+                storage.utc_now() if outcome.ok or outcome.error else None
+            ),
             simulation_body=simulation_body,
             alpha_body=alpha_body,
         )

@@ -56,6 +56,8 @@ class BatchStats:
     requested: int = 0
     ok: int = 0
     failed: int = 0
+    # Submitted but still computing when we stopped waiting; left for reconciliation.
+    pending: int = 0
     duration_seconds: float = 0.0
     failures: list[tuple[str, str]] = field(default_factory=list)
 
@@ -69,6 +71,8 @@ class ReconcileStats:
     failed: int = 0
     still_running: int = 0
     missing: int = 0
+    # Rows the platform kept computing past the abandon window.
+    abandoned: int = 0
     # Expressions whose outcome is now known, so alpha.db can mark them as backtested.
     resolved_expressions: list[str] = field(default_factory=list)
 
@@ -200,13 +204,16 @@ def reconcile_interrupted(
     client: BrainSimulationClient,
     *,
     stale_after_seconds: float = 1800.0,
+    abandon_after_seconds: float = 6 * 3600.0,
 ) -> ReconcileStats:
     """Finalise rows created at submit time whose result was never recorded.
 
-    Such a row appears when the process stops while the platform is still computing.
-    The platform keeps the simulation, so the id is polled once here: finished runs get
-    their results (or error) written, ids the platform no longer knows are flagged as
-    interrupted, and runs still in flight are left for the next pass.
+    Such a row appears when the process stops while the platform is still computing, or
+    when a live run hits its polling timeout. The platform keeps the simulation, so the id
+    is polled once here: finished runs get their results (or error) written, ids the
+    platform no longer knows are flagged as interrupted, and runs still in flight are left
+    for the next pass until they exceed ``abandon_after_seconds`` (platform still
+    computing) or ``stale_after_seconds`` (no Retry-After, progress only).
     """
     stats = ReconcileStats()
     rows = storage.pending_placeholders(connection)
@@ -261,24 +268,36 @@ def reconcile_interrupted(
             continue
 
         if not body.get("finished"):
-            if body.get("waiting") or _age_seconds(row["simulated_at"]) < stale_after_seconds:
+            age = _age_seconds(row["simulated_at"])
+            waiting = bool(body.get("waiting"))
+            # A platform that keeps answering "Retry-After" is still computing, so it gets
+            # the longer abandon window; a bare progress reply is judged by the stale window.
+            limit = abandon_after_seconds if waiting else stale_after_seconds
+            if age < limit:
                 stats.still_running += 1
-                logger.info("%s: still running on the platform, left for the next pass", sim_uid)
+                logger.info(
+                    "%s: still running on the platform (age %.0f min, limit %.0f min), "
+                    "left for the next pass",
+                    sim_uid,
+                    age / 60,
+                    limit / 60,
+                )
                 continue
-            # No Retry-After and long past the grace window: the platform abandoned it.
-            stats.missing += 1
+
+            stats.abandoned += 1
             stats.resolved_expressions.append(row["expression"])
             progress = body.get("progress")
             detail = f"progress={progress}" if progress is not None else "no progress reported"
+            reason = "platform still computing" if waiting else "stalled"
             storage.write_outcome(
                 connection,
                 **base,
                 completed=False,
-                error=f"interrupted: stalled on the platform ({detail})",
+                error=f"interrupted: {reason} after {age / 3600:.1f}h ({detail})",
                 simulation_body=body,
                 finished_at=storage.utc_now(),
             )
-            logger.info("%s: stalled (%s), marked interrupted", sim_uid, detail)
+            logger.info("%s: %s for %.1fh, marked interrupted", sim_uid, reason, age / 3600)
             continue
 
         alpha_id = body.get("alpha")
@@ -310,12 +329,13 @@ def reconcile_interrupted(
         logger.info("%s: recovered result for alpha %s", sim_uid, alpha_id)
 
     logger.info(
-        "reconcile done: checked=%d recovered=%d failed=%d missing=%d running=%d",
+        "reconcile done: checked=%d recovered=%d failed=%d missing=%d running=%d abandoned=%d",
         stats.checked,
         stats.recovered,
         stats.failed,
         stats.missing,
         stats.still_running,
+        stats.abandoned,
     )
     return stats
 
@@ -369,12 +389,17 @@ def run_batch(
                 if outcome is not None:
                     if outcome.ok:
                         stats.ok += 1
+                    elif outcome.pending:
+                        # Still computing upstream; the row stays a placeholder and the
+                        # alpha is not marked, so the next pass can finish the job.
+                        stats.pending += 1
                     else:
                         stats.failed += 1
                         stats.failures.append((alpha.alpha_uid, outcome.error or "failed"))
-                    # A platform-level outcome counts as "backtested" even when it failed,
-                    # so the alpha is not retried forever.
-                    mark_simulated(alpha_db, [alpha.alpha_uid])
+                    if not outcome.pending:
+                        # A platform-level outcome counts as "backtested" even when it
+                        # failed, so the alpha is not retried forever.
+                        mark_simulated(alpha_db, [alpha.alpha_uid])
                 # A crash before reaching the platform leaves the alpha unsimulated for a retry.
                 completed += 1
                 if progress_every and completed % progress_every == 0:
@@ -383,11 +408,12 @@ def run_batch(
                     remaining = len(alphas) - completed
                     eta = remaining / rate if rate else 0.0
                     logger.info(
-                        "progress %d/%d  ok=%d failed=%d  %.2f/min  eta %.0f min",
+                        "progress %d/%d  ok=%d failed=%d pending=%d  %.2f/min  eta %.0f min",
                         completed,
                         len(alphas),
                         stats.ok,
                         stats.failed,
+                        stats.pending,
                         rate * 60,
                         eta / 60,
                     )
@@ -455,7 +481,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--stale-minutes",
         type=float,
         default=30.0,
-        help="age after which an unanswered simulation counts as interrupted (default 30)",
+        help="age after which a simulation reporting only progress counts as interrupted (default 30)",
+    )
+    parser.add_argument(
+        "--abandon-after-hours",
+        type=float,
+        default=6.0,
+        help="age after which a simulation the platform still reports as computing is abandoned (default 6)",
     )
     parser.add_argument("--log-dir", type=Path, default=DEFAULT_LOG_DIR)
     parser.add_argument("--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR"])
@@ -475,7 +507,10 @@ def _run_reconcile(args: argparse.Namespace) -> ReconcileStats | None:
     client = BrainSimulationClient(credentials)
     try:
         stats = reconcile_interrupted(
-            connection, client, stale_after_seconds=max(args.stale_minutes, 0) * 60
+            connection,
+            client,
+            stale_after_seconds=max(args.stale_minutes, 0) * 60,
+            abandon_after_seconds=max(args.abandon_after_hours, 0) * 3600,
         )
     except BrainSimulationError as exc:
         logger.error("cannot reconcile interrupted rows: %s", exc)
@@ -536,7 +571,8 @@ def main(argv: list[str] | None = None) -> int:
         print(
             f"reconciled interrupted rows: checked={stats_reconcile.checked} "
             f"recovered={stats_reconcile.recovered} failed={stats_reconcile.failed} "
-            f"missing={stats_reconcile.missing} running={stats_reconcile.still_running}"
+            f"missing={stats_reconcile.missing} running={stats_reconcile.still_running} "
+            f"abandoned={stats_reconcile.abandoned}"
         )
         if args.reconcile_only:
             return EXIT_OK
@@ -571,7 +607,7 @@ def main(argv: list[str] | None = None) -> int:
 
     print(
         f"backtested {stats.requested} alphas in {stats.duration_seconds:.0f}s "
-        f"(ok={stats.ok}, failed={stats.failed})"
+        f"(ok={stats.ok}, failed={stats.failed}, pending={stats.pending})"
     )
     for alpha_uid, reason in stats.failures[:10]:
         print(f"  failed {alpha_uid}: {reason[:120]}")
