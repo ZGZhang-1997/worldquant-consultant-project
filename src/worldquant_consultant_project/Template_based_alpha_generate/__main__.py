@@ -32,6 +32,9 @@ EXIT_EMPTY = 3
 
 DEFAULT_LOG_DIR = DEFAULT_BRAIN_DB.parent / "logs"
 
+# VECTOR fields are BRAIN "event inputs"; ts_* / divide / group_* operators reject them.
+EVENT_FIELD_TYPES = frozenset({"VECTOR"})
+
 
 def _csv(value: str | None) -> list[str] | None:
     if not value:
@@ -54,6 +57,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--template", help="comma separated template ids to generate (default: all)")
     parser.add_argument("--limit-per-template", type=int, help="generate at most N alphas per template")
+    parser.add_argument(
+        "--include-event-fields",
+        action="store_true",
+        help="keep VECTOR (event) fields; BRAIN rejects them with time-series operators",
+    )
     parser.add_argument("--dry-run", action="store_true", help="report candidate and combination counts only")
     parser.add_argument("--clear", action="store_true", help="delete existing alphas before inserting")
     parser.add_argument("--log-dir", type=Path, default=DEFAULT_LOG_DIR)
@@ -104,11 +112,15 @@ def main(argv: list[str] | None = None) -> int:
     try:
         source = resolve_label_source(brain, args.label_source)
         logger.info("label source: %s", source.name)
+        excluded = frozenset() if args.include_event_fields else EVENT_FIELD_TYPES
+        if excluded:
+            logger.info("excluding field types: %s", ", ".join(sorted(excluded)))
         generated, pools, duplicates = generate_alphas(
             brain,
             templates,
             source,
             limit_per_template=args.limit_per_template,
+            exclude_types=excluded,
         )
     except (LabelSourceError, GenerationError) as exc:
         logger.error("%s", exc)

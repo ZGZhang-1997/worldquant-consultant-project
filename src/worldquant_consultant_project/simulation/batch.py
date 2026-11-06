@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import re
 import sqlite3
 import sys
 import threading
@@ -37,7 +38,13 @@ from .settings import (
 logger = logging.getLogger("simulation.batch")
 
 DEFAULT_ALPHA_DB = DEFAULT_SIMULATIONS_DB.parent / "alpha.db"
+DEFAULT_BRAIN_DB = DEFAULT_SIMULATIONS_DB.parent / "brain.db"
 DEFAULT_LOG_DIR = DEFAULT_SIMULATIONS_DB.parent / "logs"
+
+# BRAIN rejects VECTOR ("event input") fields inside ts_* / divide / cross-sectional operators.
+EVENT_FIELD_TYPES = ("VECTOR",)
+
+IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
 EXIT_OK = 0
 EXIT_CONFIG = 2
@@ -80,6 +87,27 @@ def load_pending_alphas(
         return [PendingAlpha(row["alpha_uid"], row["expression"]) for row in connection.execute(sql, params)]
     finally:
         connection.close()
+
+
+def load_event_fields(brain_db: Path | str) -> set[str]:
+    """Field ids BRAIN treats as event inputs (VECTOR type)."""
+    db_path = Path(brain_db)
+    if not db_path.is_file():
+        raise FileNotFoundError(f"catalogue database not found: {db_path}")
+    connection = sqlite3.connect(str(db_path), timeout=60.0)
+    try:
+        rows = connection.execute(
+            f"SELECT DISTINCT field_id FROM data_fields "
+            f"WHERE type IN ({','.join('?' * len(EVENT_FIELD_TYPES))})",
+            EVENT_FIELD_TYPES,
+        )
+        return {row[0] for row in rows}
+    finally:
+        connection.close()
+
+
+def uses_event_fields(expression: str, event_fields: set[str]) -> bool:
+    return any(token in event_fields for token in IDENTIFIER.findall(expression))
 
 
 def mark_simulated(alpha_db: Path | str, alpha_uids: Iterable[str], when: str | None = None) -> int:
@@ -246,6 +274,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--alpha-db", type=Path, default=DEFAULT_ALPHA_DB, help="alpha database")
     parser.add_argument("--db", type=Path, default=DEFAULT_SIMULATIONS_DB, help="results database")
+    parser.add_argument(
+        "--brain-db", type=Path, default=DEFAULT_BRAIN_DB, help="catalogue used to spot event fields"
+    )
+    parser.add_argument(
+        "--include-event-fields",
+        action="store_true",
+        help="also submit alphas that reference VECTOR (event) fields, which BRAIN rejects",
+    )
     parser.add_argument("--settings", type=Path, default=DEFAULT_SETTINGS_PATH, help="simulation_setting.json")
     parser.add_argument(
         "--concurrency-file",
@@ -286,6 +322,24 @@ def main(argv: list[str] | None = None) -> int:
         logger.error("%s", exc)
         return EXIT_CONFIG
 
+    skipped_event = 0
+    if not args.include_event_fields:
+        try:
+            event_fields = load_event_fields(args.brain_db)
+        except FileNotFoundError as exc:
+            logger.error("%s", exc)
+            return EXIT_CONFIG
+        if event_fields:
+            before = len(pending)
+            pending = [a for a in pending if not uses_event_fields(a.expression, event_fields)]
+            skipped_event = before - len(pending)
+            logger.info(
+                "skipped %d alphas referencing %d VECTOR (event) fields; "
+                "BRAIN rejects them with ts_*/divide operators",
+                skipped_event,
+                len(event_fields),
+            )
+
     logger.info(
         "settings: %s | workers=%d | pending=%d | db=%s",
         settings.payload,
@@ -295,6 +349,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     if args.dry_run:
         print(f"pending alphas: {len(pending)}")
+        if skipped_event:
+            print(f"  skipped (event inputs): {skipped_event}")
         for alpha in pending[:5]:
             print(f"  {alpha.alpha_uid}  {alpha.expression}")
         if len(pending) > 5:
@@ -303,6 +359,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if not pending:
         print("nothing to backtest")
+        if skipped_event:
+            print(f"  {skipped_event} alphas were skipped because they use VECTOR (event) fields")
         return EXIT_OK
 
     try:
@@ -327,6 +385,8 @@ def main(argv: list[str] | None = None) -> int:
         f"backtested {stats.requested} alphas in {stats.duration_seconds:.0f}s "
         f"(ok={stats.ok}, failed={stats.failed})"
     )
+    if skipped_event:
+        print(f"skipped {skipped_event} alphas that reference VECTOR (event) fields")
     for alpha_uid, reason in stats.failures[:10]:
         print(f"  failed {alpha_uid}: {reason[:120]}")
     if len(stats.failures) > 10:

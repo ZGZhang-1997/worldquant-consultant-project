@@ -49,10 +49,15 @@ class TemplateCandidates:
 
 
 def collect_candidates(
-    connection: sqlite3.Connection, template: TemplateSpec, source: LabelSource
+    connection: sqlite3.Connection,
+    template: TemplateSpec,
+    source: LabelSource,
+    *,
+    exclude_types: frozenset[str] = frozenset(),
 ) -> TemplateCandidates:
     slots = {
-        name: select_fields(connection, rule, source) for name, rule in template.slots.items()
+        name: select_fields(connection, rule, source, exclude_types=exclude_types)
+        for name, rule in template.slots.items()
     }
     empty = [name for name, candidates in slots.items() if not candidates]
     if empty:
@@ -96,11 +101,14 @@ def generate_alphas(
     *,
     limit_per_template: int | None = None,
     seen: set[str] | None = None,
+    exclude_types: frozenset[str] = frozenset(),
 ) -> tuple[list[GeneratedAlpha], dict[str, TemplateCandidates], int]:
     """Generate expressions for every template.
 
     Returns the accepted alphas, the candidate pools and the number of duplicates skipped.
     ``seen`` lets callers dedupe across repeated calls (it is updated in place).
+    ``exclude_types`` drops field types the BRAIN operators cannot consume (e.g. VECTOR
+    event inputs).
     """
     hashes = seen if seen is not None else set()
     generated: list[GeneratedAlpha] = []
@@ -108,7 +116,9 @@ def generate_alphas(
     duplicates = 0
 
     for template in templates:
-        candidates = collect_candidates(connection, template, source)
+        candidates = collect_candidates(
+            connection, template, source, exclude_types=exclude_types
+        )
         pools[template.template_id] = candidates
         logger.info(
             "%s: %s -> %d combinations",
