@@ -214,10 +214,11 @@ uv run python -m worldquant_consultant_project.simulation.batch --limit 20  # �
 
 - **取数**：从 `data/alpha.db` 的 `alphas` 表读取 `simulated IS NULL` 的因子（按 `alpha_uid` 排序）
 - **并发**：线程池大小取自 [`maximum_concurrent_number`](./src/worldquant_consultant_project/simulation/maximum_concurrent_number)（当前 `3`，即账号允许的同时回测数），`--workers` 可临时覆盖
-- **参数**：取自 [`simulation_setting.json`](./src/worldquant_consultant_project/simulation/simulation_setting.json)（`type` + `settings`），每个线程独立登录并复用会话
+- **参数**：取自 [`batch_simulation_settings.json`](./src/worldquant_consultant_project/simulation/batch_simulation_settings.json)（`type` + `settings`），每个线程独立登录并复用会话
 - **写回**：回测完成（无论成功或因子报错）后把 `alphas.simulated` 置 1、`simulated_at` 写入时间；本地崩溃（未真正提交）与平台报错不标记，便于重试
 - **覆盖**：`alpha_simulations` 上建有 `(expression, settings_json)` 唯一索引，同一表达式 + 同一参数重跑会**覆盖原行并保留原 `sim_uid`**，不会新增重复记录；换个参数则是**新增一行**，同一个 `alpha_uid` 下可以有多条
 - **限流**：提交遇到 429（超出并发额度）会按 `Retry-After` 等待后重试，不会让该因子失败
+- **优化设置**：[`optimization_simulation_settings.json`](./src/worldquant_consultant_project/simulation/optimization_simulation_settings.json) 目前是空占位（`{}`），预留给后续的参数优化环节；可用 `settings.OPTIMIZATION_SETTINGS_PATH` 取到路径
 
 | 参数 | 说明 |
 |---|---|

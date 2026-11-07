@@ -7,7 +7,9 @@ from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 from typing import Any
 
-DEFAULT_SETTINGS_PATH = Path(__file__).with_name("simulation_setting.json")
+DEFAULT_SETTINGS_PATH = Path(__file__).with_name("batch_simulation_settings.json")
+#: Placeholder for the optimisation settings; filled in when that step is implemented.
+OPTIMIZATION_SETTINGS_PATH = Path(__file__).with_name("optimization_simulation_settings.json")
 DEFAULT_CONCURRENCY_PATH = Path(__file__).with_name("maximum_concurrent_number")
 
 # BRAIN's usual defaults for a single REGULAR fast-expression simulation.
@@ -120,7 +122,7 @@ class SimulationSettings:
 
 
 def load_settings_file(path: Path | str | None = None) -> tuple[str, SimulationSettings]:
-    """Read ``simulation_setting.json`` and return ``(simulation_type, settings)``."""
+    """Read ``batch_simulation_settings.json`` and return ``(simulation_type, settings)``."""
     settings_path = Path(path) if path else DEFAULT_SETTINGS_PATH
     if not settings_path.is_file():
         raise SettingsFileError(f"settings file not found: {settings_path}")

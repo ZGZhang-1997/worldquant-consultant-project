@@ -1,7 +1,7 @@
 """Batch backtests: run every un-simulated alpha from ``alpha.db`` with a thread pool.
 
 Concurrency comes from ``maximum_concurrent_number`` (the account's simultaneous
-simulation allowance) and the parameters come from ``simulation_setting.json``.
+simulation allowance) and the parameters come from ``batch_simulation_settings.json``.
 Results land in ``alpha.db`` next to the factors themselves, keyed by
 ``alpha_uid``; re-running the same expression with the same settings overwrites
 the previous row instead of adding a new one.
@@ -508,7 +508,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="deprecated alias for --alpha-db (kept so old commands keep working)",
     )
-    parser.add_argument("--settings", type=Path, default=DEFAULT_SETTINGS_PATH, help="simulation_setting.json")
+    parser.add_argument(
+        "--settings",
+        type=Path,
+        default=DEFAULT_SETTINGS_PATH,
+        help="batch_simulation_settings.json",
+    )
     parser.add_argument(
         "--concurrency-file",
         type=Path,
