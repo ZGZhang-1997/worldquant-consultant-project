@@ -21,6 +21,9 @@ MAX_POLL_INTERVAL = 60.0
 class BrainSimulationError(RuntimeError):
     """A simulation request failed (auth, HTTP or platform-side rejection)."""
 
+    #: True when the factor itself was rejected (bad expression, wrong field, …).
+    factor_caused: bool = False
+
     def __init__(
         self,
         message: str,
@@ -44,8 +47,49 @@ class BrainSimulationError(RuntimeError):
             return f"{message} (line {location.get('line')}, start {location.get('start')})"
         return str(message) or str(self)
 
-class SimulationTimeout(BrainSimulationError):
+    @property
+    def error_kind(self) -> str:
+        """``"factor"`` when the expression/data is at fault, else ``"platform"``."""
+        return "factor" if self.factor_caused else "platform"
+
+
+class PlatformError(BrainSimulationError):
+    """The platform refused or dropped the request for reasons unrelated to the factor.
+
+    Covers expired sessions, quota and concurrency limits, server errors and transport
+    failures. The factor itself was never evaluated, so it must stay eligible for retry.
+    """
+
+    factor_caused = False
+
+
+class SimulationLimitError(PlatformError):
+    """A submission quota (daily or concurrent) blocked the request."""
+
+    def __init__(self, message: str, *, scope: str, **kwargs: Any) -> None:
+        super().__init__(message, **kwargs)
+        #: ``"daily"`` or ``"concurrent"``.
+        self.scope = scope
+
+
+class FactorError(BrainSimulationError):
+    """The platform evaluated the factor and rejected it (syntax, type, unknown field)."""
+
+    factor_caused = True
+
+
+class SimulationTimeout(PlatformError):
     """The simulation did not finish before the deadline."""
+
+
+#: HTTP statuses that mean "platform problem", never "bad factor".
+PLATFORM_STATUS_CODES = frozenset({401, 403, 408, 425, 429})
+
+
+def _error_class_for(status_code: int | None) -> type[BrainSimulationError]:
+    if status_code is None or status_code >= 500 or status_code in PLATFORM_STATUS_CODES:
+        return PlatformError
+    return FactorError
 
 
 class BrainSimulationClient:
@@ -59,12 +103,14 @@ class BrainSimulationClient:
         timeout: float = 60.0,
         poll_timeout: float = 900.0,
         max_submit_retries: int = 60,
+        max_submit_auth_retries: int = 3,
         session: requests.Session | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
         self.poll_timeout = poll_timeout
         self.max_submit_retries = max_submit_retries
+        self.max_submit_auth_retries = max_submit_auth_retries
         self._credentials = credentials
         self._session = session or requests.Session()
         self._authenticated = False
@@ -101,21 +147,48 @@ class BrainSimulationClient:
     # ------------------------------------------------------------- simulate
 
     def submit(self, expression: str, settings_payload: dict[str, Any]) -> str:
-        """POST a simulation and return the polling URL from the Location header."""
+        """POST a simulation and return the polling URL from the Location header.
+
+        Platform-level refusals are retried or surfaced as :class:`PlatformError` so the
+        caller knows the factor was never evaluated. An expired session is re-established
+        instead of being reported as a factor failure.
+        """
         self.authenticate()
         payload = {
             "type": "REGULAR",
             "settings": settings_payload,
             "regular": expression,
         }
-        # The platform rejects submissions beyond the account's concurrency allowance with
-        # 429 + Retry-After; wait it out instead of failing the whole backtest.
         attempts = 0
+        reauths = 0
         while True:
             try:
                 response = self._request("post", SIMULATIONS_PATH, json=payload)
                 break
+            except SimulationLimitError as exc:
+                if exc.scope == "concurrent" and attempts < self.max_submit_retries:
+                    attempts += 1
+                    delay = exc.retry_after or _retry_after_from_payload(exc.payload)
+                    logger.info(
+                        "simulation limit reached (%s), retrying in %.1fs (%d/%d)",
+                        exc.scope,
+                        delay,
+                        attempts,
+                        self.max_submit_retries,
+                    )
+                    time.sleep(delay)
+                    continue
+                raise
             except BrainSimulationError as exc:
+                if exc.status_code == 401 and reauths < self.max_submit_auth_retries:
+                    reauths += 1
+                    logger.info(
+                        "session rejected on submit (attempt %d/%d), re-authenticating",
+                        reauths,
+                        self.max_submit_auth_retries,
+                    )
+                    self.authenticate(force=True)
+                    continue
                 if exc.status_code != 429 or attempts >= self.max_submit_retries:
                     raise
                 attempts += 1
@@ -160,12 +233,12 @@ class BrainSimulationClient:
             if finished:
                 status = str(body.get("status", "")).upper()
                 if status in ("ERROR", "FAIL", "FAILED"):
-                    raise BrainSimulationError(
+                    raise FactorError(
                         f"simulation failed: {body.get('message') or status}",
                         payload=body,
                     )
                 if not body.get("alpha"):
-                    raise BrainSimulationError(
+                    raise PlatformError(
                         f"simulation finished without an alpha id (status={status or 'unknown'})",
                         payload=body,
                     )
@@ -204,7 +277,7 @@ class BrainSimulationClient:
         try:
             response = self._get_with_auth_retry(f"{self.base_url}/simulations/{sim_id}")
         except BrainSimulationError as exc:
-            if exc.status_code in (404, 403):
+            if exc.status_code == 404:
                 return None
             raise
         body = _json_or_empty(response)
@@ -224,7 +297,7 @@ class BrainSimulationClient:
         try:
             response = getattr(self._session, method)(url, timeout=self.timeout, **kwargs)
         except requests.RequestException as exc:
-            raise BrainSimulationError(f"{method.upper()} {path} failed: {exc}") from exc
+            raise PlatformError(f"{method.upper()} {path} failed: {exc}") from exc
 
         if response.status_code in (200, 201):
             return response
@@ -235,7 +308,18 @@ class BrainSimulationClient:
         if isinstance(location, dict) and location.get("line"):
             detail = f"{detail} (line {location.get('line')}, start {location.get('start')})"
         retry_after = response.headers.get("Retry-After")
-        raise BrainSimulationError(
+        if response.status_code == 429:
+            scope = _limit_scope(detail)
+            if scope:
+                raise SimulationLimitError(
+                    f"{method.upper()} {path} blocked by the {scope} simulation limit",
+                    scope=scope,
+                    status_code=response.status_code,
+                    payload=payload,
+                    retry_after=float(retry_after) if _is_number(retry_after) else None,
+                )
+        error_class = _error_class_for(response.status_code)
+        raise error_class(
             f"{method.upper()} {path} returned HTTP {response.status_code}: {detail}".rstrip(": "),
             status_code=response.status_code,
             payload=payload,
@@ -266,6 +350,16 @@ def _poll_delay(retry_after: str | None) -> float:
     except (TypeError, ValueError):
         delay = MIN_POLL_INTERVAL
     return min(max(delay, MIN_POLL_INTERVAL), MAX_POLL_INTERVAL)
+
+
+def _limit_scope(text: str) -> str | None:
+    """Detect a BRAIN quota refusal in an error payload (``daily`` / ``concurrent``)."""
+    upper = (text or "").upper()
+    if "DAILY_SIMULATION_LIMIT" in upper:
+        return "daily"
+    if "CONCURRENT_SIMULATION_LIMIT" in upper:
+        return "concurrent"
+    return None
 
 
 def _retry_after_from_payload(payload: dict[str, Any]) -> float:

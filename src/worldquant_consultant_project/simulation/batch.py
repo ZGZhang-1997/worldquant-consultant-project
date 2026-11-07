@@ -55,11 +55,16 @@ class PendingAlpha:
 class BatchStats:
     requested: int = 0
     ok: int = 0
+    # The platform evaluated the factor and rejected it (counts as backtested).
     failed: int = 0
+    # Platform-side failures: the factor was never evaluated, so it stays pending.
+    platform_failed: int = 0
     # Submitted but still computing when we stopped waiting; left for reconciliation.
     pending: int = 0
     duration_seconds: float = 0.0
     failures: list[tuple[str, str]] = field(default_factory=list)
+    last_platform_error: str | None = None
+    abort_reason: str | None = None
 
 
 @dataclass
@@ -129,6 +134,55 @@ def mark_simulated(alpha_db: Path | str, alpha_uids: Iterable[str], when: str | 
                 f"UPDATE alphas SET simulated = 1, simulated_at = ? "
                 f"WHERE alpha_uid IN ({','.join('?' * len(batch))}) AND simulated IS NULL",
                 [timestamp, *batch],
+            )
+            updated += cursor.rowcount
+        connection.commit()
+        return updated
+    finally:
+        connection.close()
+
+
+def purge_platform_errors(
+    *, simulations_db: Path | str, alpha_db: Path | str
+) -> tuple[int, int]:
+    """Delete platform-caused failures and unmark their alphas.
+
+    Returns ``(deleted_runs, unmarked_alphas)``.
+    """
+    connection = storage.connect(simulations_db)
+    try:
+        rows = storage.platform_error_rows(connection)
+        if not rows:
+            return 0, 0
+        expressions = [row["expression"] for row in rows]
+        deleted = storage.delete_simulations(connection, [row["sim_uid"] for row in rows])
+    finally:
+        connection.close()
+
+    unmarked = unmark_simulated_by_expression(alpha_db, expressions)
+    logger.info(
+        "purged %d platform-caused run(s); unmarked %d alpha(s)", deleted, unmarked
+    )
+    return deleted, unmarked
+
+
+def unmark_simulated_by_expression(
+    alpha_db: Path | str, expressions: Iterable[str]
+) -> int:
+    """Reset ``simulated`` for alphas whose run failed for platform reasons."""
+    unique = [text for text in dict.fromkeys(expressions) if text]
+    if not unique:
+        return 0
+    connection = sqlite3.connect(str(alpha_db), timeout=60.0)
+    try:
+        connection.execute("PRAGMA busy_timeout = 60000")
+        updated = 0
+        for start in range(0, len(unique), 200):
+            batch = unique[start : start + 200]
+            cursor = connection.execute(
+                f"UPDATE alphas SET simulated = NULL, simulated_at = NULL "
+                f"WHERE expression IN ({','.join('?' * len(batch))})",
+                batch,
             )
             updated += cursor.rowcount
         connection.commit()
@@ -340,6 +394,26 @@ def reconcile_interrupted(
     return stats
 
 
+def outcome_bucket(outcome: SimulationOutcome) -> str:
+    """Classify a finished run: ``ok`` / ``pending`` / ``factor`` / ``platform``.
+
+    Only ``ok`` and ``factor`` mean the alpha should be marked as backtested; ``pending``
+    is still computing and ``platform`` never evaluated the factor.
+    """
+    if outcome.ok:
+        return "ok"
+    if outcome.pending:
+        return "pending"
+    if outcome.factor_caused:
+        return "factor"
+    return "platform"
+
+
+def should_mark_simulated(outcome: SimulationOutcome) -> bool:
+    """Whether this outcome justifies marking the alpha as backtested."""
+    return outcome_bucket(outcome) in ("ok", "factor")
+
+
 def run_batch(
     alphas: Sequence[PendingAlpha],
     *,
@@ -362,6 +436,21 @@ def run_batch(
     pool = _ClientPool(credentials, poll_timeout=timeout, max_submit_retries=60)
     started = time.monotonic()
     completed = 0
+    consecutive_platform = 0
+    # A run of platform failures means the account (quota, session, outage) is the problem,
+    # so the batch stops instead of burning through the whole list.
+    platform_streak_limit = max(5, workers * 2)
+
+    def should_abort() -> bool:
+        if stats.abort_reason:
+            return True
+        if consecutive_platform >= platform_streak_limit:
+            stats.abort_reason = (
+                f"{consecutive_platform} consecutive platform failures "
+                f"(last: {stats.last_platform_error})"
+            )
+            return True
+        return False
 
     def worker(alpha: PendingAlpha) -> SimulationOutcome:
         return run_simulation(
@@ -387,32 +476,61 @@ def run_batch(
                     outcome = None
 
                 if outcome is not None:
-                    if outcome.ok:
+                    bucket = outcome_bucket(outcome)
+                    if bucket == "ok":
                         stats.ok += 1
-                    elif outcome.pending:
+                        consecutive_platform = 0
+                        mark_simulated(alpha_db, [alpha.alpha_uid])
+                    elif bucket == "pending":
                         # Still computing upstream; the row stays a placeholder and the
                         # alpha is not marked, so the next pass can finish the job.
                         stats.pending += 1
-                    else:
+                        consecutive_platform = 0
+                    elif bucket == "factor":
+                        # The platform judged the factor and rejected it: retrying the same
+                        # expression would fail again, so it counts as backtested.
                         stats.failed += 1
                         stats.failures.append((alpha.alpha_uid, outcome.error or "failed"))
-                    if not outcome.pending:
-                        # A platform-level outcome counts as "backtested" even when it
-                        # failed, so the alpha is not retried forever.
+                        consecutive_platform = 0
                         mark_simulated(alpha_db, [alpha.alpha_uid])
+                    else:
+                        # Platform-side problem (quota, session, server): the factor was
+                        # never evaluated, so leave it pending for the next run.
+                        stats.platform_failed += 1
+                        stats.failures.append((alpha.alpha_uid, outcome.error or "platform error"))
+                        stats.last_platform_error = outcome.error
+                        consecutive_platform += 1
+                        if outcome.limit_scope == "daily":
+                            # No further submission can succeed today.
+                            stats.abort_reason = "daily simulation limit reached"
                 # A crash before reaching the platform leaves the alpha unsimulated for a retry.
                 completed += 1
+
+                if should_abort():
+                    logger.error(
+                        "stopping the batch: %s (%d consecutive platform failures, "
+                        "%d total); the remaining alphas stay pending",
+                        stats.abort_reason,
+                        consecutive_platform,
+                        stats.platform_failed,
+                    )
+                    for pending_future in futures:
+                        pending_future.cancel()
+                    break
+
                 if progress_every and completed % progress_every == 0:
                     elapsed = time.monotonic() - started
                     rate = completed / elapsed if elapsed else 0.0
                     remaining = len(alphas) - completed
                     eta = remaining / rate if rate else 0.0
                     logger.info(
-                        "progress %d/%d  ok=%d failed=%d pending=%d  %.2f/min  eta %.0f min",
+                        "progress %d/%d  ok=%d factor_failed=%d platform_failed=%d pending=%d  "
+                        "%.2f/min  eta %.0f min",
                         completed,
                         len(alphas),
                         stats.ok,
                         stats.failed,
+                        stats.platform_failed,
                         stats.pending,
                         rate * 60,
                         eta / 60,
@@ -489,6 +607,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=6.0,
         help="age after which a simulation the platform still reports as computing is abandoned (default 6)",
     )
+    parser.add_argument(
+        "--purge-platform-errors",
+        action="store_true",
+        help="delete runs that failed for platform reasons and unmark their alphas",
+    )
     parser.add_argument("--log-dir", type=Path, default=DEFAULT_LOG_DIR)
     parser.add_argument("--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR"])
     return parser
@@ -563,6 +686,13 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  ... and {len(pending) - 5} more")
         return EXIT_OK
 
+    if args.purge_platform_errors:
+        deleted, unmarked = purge_platform_errors(
+            simulations_db=args.db, alpha_db=args.alpha_db
+        )
+        print(f"deleted {deleted} platform-caused run(s); unmarked {unmarked} alpha(s)")
+        return EXIT_OK
+
     reconcile = not args.no_reconcile
     if reconcile or args.reconcile_only:
         stats_reconcile = _run_reconcile(args)
@@ -607,8 +737,12 @@ def main(argv: list[str] | None = None) -> int:
 
     print(
         f"backtested {stats.requested} alphas in {stats.duration_seconds:.0f}s "
-        f"(ok={stats.ok}, failed={stats.failed}, pending={stats.pending})"
+        f"(ok={stats.ok}, factor_failed={stats.failed}, "
+        f"platform_failed={stats.platform_failed}, pending={stats.pending})"
     )
+    if stats.abort_reason:
+        print(f"batch stopped early: {stats.abort_reason}")
+        print("  remaining alphas were left pending and can be resumed later")
     for alpha_uid, reason in stats.failures[:10]:
         print(f"  failed {alpha_uid}: {reason[:120]}")
     if len(stats.failures) > 10:

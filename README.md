@@ -217,8 +217,29 @@ uv run python -m worldquant_consultant_project.simulation.batch --limit 20  # �
 | `--no-reconcile` | 跳过启动时的自动收尾 |
 | `--stale-minutes` | 只回进度（无 `Retry-After`）时，超过多少分钟判为停滞（默认 30） |
 | `--abandon-after-hours` | 平台一直回 `Retry-After` 时，超过多少小时放弃（默认 6） |
+| `--purge-platform-errors` | 删除「平台原因」导致失败的记录，并取消对应因子的已回测标记 |
 
 退出码：`0` 全部成功；`2` 配置/鉴权失败；`3` 存在失败因子（失败记录已入库，可据此排查）。
+
+### 错误分类：平台原因 vs 因子原因
+
+只有**平台真正评估过该因子**并拒绝它，才算「已回测」；平台侧问题（额度、会话、服务异常）
+不算，因子会留在待回测队列里下次重试。
+
+| 类型 | 典型情况 | 是否入库 | 是否标记已回测 |
+|---|---|---|---|
+| **成功** | 回测完成 | 是（含 IS 指标） | 是 |
+| **因子原因** | 表达式语法错误、`Operator ts_delta does not support event inputs`、未知字段（HTTP 400 / 模拟 `status=ERROR`） | 是（`error_kind='factor'`） | **是** |
+| **平台原因** | 每日/并发额度（`DAILY_SIMULATION_LIMIT_EXCEEDED`、`CONCURRENT_SIMULATION_LIMIT_EXCEEDED`）、会话过期 401、403、5xx、连接中断 | **否**（占位行会被删除） | **否** |
+| 回测超时 | 平台仍在计算 | 是（占位行，待收尾） | 否 |
+
+配套行为：
+
+- **401 自动重鉴权**：提交时会话过期会被识别、重新登录并重试（最多 3 次），不再被误判为因子失败
+- **额度保护**：连续平台失败达到 `max(5, 2×workers)` 次，或收到每日额度错误时，批量立即停止，
+  剩余因子保持待回测
+- **历史数据清理**：`--purge-platform-errors` 会删除 `error_kind='platform'` 的记录，并把
+  `alpha.db` 中对应表达式的 `simulated` 重置为 NULL（旧库在首次连接时会自动回填 `error_kind`）
 
 ### 平台侧停滞 / 超时的处理
 

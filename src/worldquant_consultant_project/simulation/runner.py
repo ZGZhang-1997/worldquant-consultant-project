@@ -12,7 +12,13 @@ from typing import Any
 
 from ..acquisition.config import DEFAULT_DATA_DIR, load_credentials
 from . import storage
-from .client import BrainSimulationClient, BrainSimulationError, SimulationTimeout
+from .client import (
+    BrainSimulationClient,
+    BrainSimulationError,
+    FactorError,
+    PlatformError,
+    SimulationTimeout,
+)
 from .settings import SimulationSettings
 
 logger = logging.getLogger(__name__)
@@ -38,6 +44,11 @@ class SimulationOutcome:
     # Submitted, but the platform had not finished when we stopped waiting. The row is
     # kept as a placeholder so a later reconciliation pass can still collect the result.
     pending: bool = False
+    # True only when the platform evaluated the factor and rejected it; platform-side
+    # failures leave it False so the factor is retried later.
+    factor_caused: bool = False
+    # Set when a submission quota blocked the run ("daily" / "concurrent").
+    limit_scope: str | None = None
 
     @property
     def ok(self) -> bool:
@@ -140,7 +151,20 @@ def run_simulation(
             sim_uid,
             timeout,
         )
+    except PlatformError as exc:
+        # Quota, session, server or connection problem: the factor was never evaluated, so
+        # nothing is recorded and the alpha stays eligible for the next run.
+        outcome.status = "platform_error"
+        outcome.error = getattr(exc, "detail", None) or str(exc)
+        outcome.limit_scope = getattr(exc, "scope", None)
+        logger.warning("platform error for %r: %s", expression[:60], outcome.error)
+    except FactorError as exc:
+        outcome.factor_caused = True
+        outcome.error = getattr(exc, "detail", None) or str(exc)
+        logger.error("simulation failed for %r: %s", expression[:60], outcome.error)
     except BrainSimulationError as exc:
+        outcome.factor_caused = exc.factor_caused
+        outcome.status = "failed" if outcome.factor_caused else "platform_error"
         outcome.error = getattr(exc, "detail", None) or str(exc)
         logger.error("simulation failed for %r: %s", expression[:60], outcome.error)
     except Exception as exc:  # noqa: BLE001 - always keep an audit trail
@@ -151,24 +175,31 @@ def run_simulation(
             client.close()
 
         outcome.duration_seconds = round(time.monotonic() - started, 3)
-        storage.write_outcome(
-            connection,
-            sim_uid=sim_uid,
-            expression=expression,
-            settings=resolved.stored,
-            completed=outcome.ok,
-            simulated_at=simulated_at,
-            duration_seconds=outcome.duration_seconds,
-            braint_sim_id=outcome.braint_sim_id,
-            alpha_id=outcome.alpha_id,
-            error=outcome.error,
-            # A pending run keeps finished_at empty so it still looks like a placeholder.
-            finished_at=(
-                storage.utc_now() if outcome.ok or outcome.error else None
-            ),
-            simulation_body=simulation_body,
-            alpha_body=alpha_body,
-        )
+        if outcome.status == "platform_error":
+            # Do not keep anything for platform failures: the row would look like a
+            # backtested factor and the run could never be retried cleanly.
+            storage.delete_simulations(connection, [sim_uid])
+            connection.commit()
+        else:
+            storage.write_outcome(
+                connection,
+                sim_uid=sim_uid,
+                expression=expression,
+                settings=resolved.stored,
+                completed=outcome.ok,
+                simulated_at=simulated_at,
+                duration_seconds=outcome.duration_seconds,
+                braint_sim_id=outcome.braint_sim_id,
+                alpha_id=outcome.alpha_id,
+                error=outcome.error,
+                error_kind="factor" if outcome.error else None,
+                # A pending run keeps finished_at empty so it still looks like a placeholder.
+                finished_at=(
+                    storage.utc_now() if outcome.ok or outcome.error else None
+                ),
+                simulation_body=simulation_body,
+                alpha_body=alpha_body,
+            )
         connection.close()
 
     if outcome.ok:

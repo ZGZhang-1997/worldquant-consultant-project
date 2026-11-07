@@ -58,6 +58,7 @@ DETAIL_COLUMNS: tuple[str, ...] = (
     "alpha_id",
     "braint_sim_id",
     "error",
+    "error_kind",
     "finished_at",
     "other_samples_json",
     "is_extra_json",
@@ -65,6 +66,10 @@ DETAIL_COLUMNS: tuple[str, ...] = (
     "raw_simulation_json",
     "raw_alpha_json",
 )
+
+#: ``error_kind`` values. Only ``factor`` errors mean the alpha was really evaluated.
+ERROR_KIND_FACTOR = "factor"
+ERROR_KIND_PLATFORM = "platform"
 
 _SIMULATIONS_TABLE = """
 CREATE TABLE IF NOT EXISTS {table} (
@@ -85,6 +90,7 @@ CREATE TABLE IF NOT EXISTS simulation_details (
     alpha_id            TEXT,
     braint_sim_id       TEXT,
     error               TEXT,
+    error_kind          TEXT,
     finished_at         TEXT,
     other_samples_json  TEXT,
     is_extra_json       TEXT,
@@ -136,6 +142,38 @@ def _base_schema() -> str:
 
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+#: Substrings that identify a failure caused by the platform, not by the factor.
+PLATFORM_ERROR_MARKERS: tuple[str, ...] = (
+    "incorrect authentication credentials",
+    "daily_simulation_limit",
+    "concurrent_simulation_limit",
+    "simulation did not finish",
+    "connection aborted",
+    "connection error",
+    "max retries exceeded",
+    "interrupted:",
+    "no location header",
+)
+
+
+def classify_error_text(text: str | None) -> str | None:
+    """Classify a stored error message: ``platform`` or ``factor``.
+
+    Used for rows written before ``error_kind`` existed, and as a fallback whenever a
+    caller only has the message.
+    """
+    if not text:
+        return None
+    lowered = text.lower()
+    if re.search(r"http (401|403|404|408|425|429)\b", lowered) or re.search(
+        r"http 5\d\d", lowered
+    ):
+        return ERROR_KIND_PLATFORM
+    if any(marker in lowered for marker in PLATFORM_ERROR_MARKERS):
+        return ERROR_KIND_PLATFORM
+    return ERROR_KIND_FACTOR
 
 
 def check_column(name: str) -> str:
@@ -195,9 +233,30 @@ def connect(path: Path | str, *, initialize: bool = True) -> sqlite3.Connection:
     # The view references tentative_submittable, so any table rebuild must happen first.
     if not _insert_tentative_column(connection):
         connection.executescript(_base_schema())
+    _ensure_error_kind(connection)
     _refresh_tentative(connection)
     connection.commit()
     return connection
+
+
+def _ensure_error_kind(connection: sqlite3.Connection) -> int:
+    """Add ``simulation_details.error_kind`` and classify rows written before it existed."""
+    columns = {row["name"] for row in connection.execute("PRAGMA table_info(simulation_details)")}
+    if "error_kind" not in columns:
+        connection.execute("ALTER TABLE simulation_details ADD COLUMN error_kind TEXT")
+        connection.commit()
+
+    unclassified = connection.execute(
+        "SELECT sim_uid, error FROM simulation_details WHERE error IS NOT NULL AND error_kind IS NULL"
+    ).fetchall()
+    if not unclassified:
+        return 0
+    connection.executemany(
+        "UPDATE simulation_details SET error_kind = ? WHERE sim_uid = ?",
+        [(classify_error_text(row["error"]), row["sim_uid"]) for row in unclassified],
+    )
+    connection.commit()
+    return len(unclassified)
 
 
 def _refresh_tentative(connection: sqlite3.Connection) -> int:
@@ -388,6 +447,7 @@ def build_rows(
     alpha_id: str | None = None,
     braint_sim_id: str | None = None,
     error: str | None = None,
+    error_kind: str | None = None,
     finished_at: str | None = None,
     simulation_body: Mapping[str, Any] | None = None,
     alpha_body: Mapping[str, Any] | None = None,
@@ -426,6 +486,7 @@ def build_rows(
         "alpha_id": alpha_id,
         "braint_sim_id": braint_sim_id,
         "error": error,
+        "error_kind": error_kind or (classify_error_text(error) if error else None),
         "finished_at": finished_at,
         "other_samples_json": json.dumps(others, ensure_ascii=False) if others else None,
         "is_extra_json": json.dumps(extra_is, ensure_ascii=False) if extra_is else None,
@@ -512,6 +573,39 @@ def recent(connection: sqlite3.Connection, limit: int = 10) -> list[sqlite3.Row]
             "SELECT * FROM v_simulation_summary LIMIT ?", (limit,)
         )
     )
+
+
+def platform_error_rows(connection: sqlite3.Connection) -> list[sqlite3.Row]:
+    """Failed runs whose failure came from the platform, so the factor was never judged."""
+    return list(
+        connection.execute(
+            """
+            SELECT s.sim_uid, s.expression, d.error
+            FROM simulations AS s
+            JOIN simulation_details AS d ON d.sim_uid = s.sim_uid
+            WHERE s.completed = 0
+              AND d.error IS NOT NULL
+              AND d.error_kind = ?
+            ORDER BY s.simulated_at
+            """,
+            (ERROR_KIND_PLATFORM,),
+        )
+    )
+
+
+def delete_simulations(connection: sqlite3.Connection, sim_uids: Sequence[str]) -> int:
+    """Delete runs by uid (details cascade). Returns the number of rows removed."""
+    uids = list(sim_uids)
+    if not uids:
+        return 0
+    removed = 0
+    for start in range(0, len(uids), 200):
+        batch = uids[start : start + 200]
+        removed += connection.execute(
+            f"DELETE FROM simulations WHERE sim_uid IN ({','.join('?' * len(batch))})", batch
+        ).rowcount
+    connection.commit()
+    return removed
 
 
 def pending_placeholders(connection: sqlite3.Connection) -> list[sqlite3.Row]:
