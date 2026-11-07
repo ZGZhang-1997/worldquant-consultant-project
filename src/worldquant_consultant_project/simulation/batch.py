@@ -2,8 +2,9 @@
 
 Concurrency comes from ``maximum_concurrent_number`` (the account's simultaneous
 simulation allowance) and the parameters come from ``simulation_setting.json``.
-Results land in ``simulations.db``; re-running the same expression with the same
-settings overwrites the previous row instead of adding a new one.
+Results land in ``alpha.db`` next to the factors themselves, keyed by
+``alpha_uid``; re-running the same expression with the same settings overwrites
+the previous row instead of adding a new one.
 """
 
 from __future__ import annotations
@@ -24,7 +25,7 @@ from typing import Iterable, Sequence
 from ..acquisition.config import CredentialsError, load_credentials
 from . import storage
 from .client import BrainSimulationClient, BrainSimulationError
-from .runner import DEFAULT_DB_PATH as DEFAULT_SIMULATIONS_DB
+from .runner import DEFAULT_DB_PATH as DEFAULT_ALPHA_DB
 from .runner import SimulationOutcome, run_simulation
 from .settings import (
     DEFAULT_CONCURRENCY_PATH,
@@ -37,8 +38,7 @@ from .settings import (
 
 logger = logging.getLogger("simulation.batch")
 
-DEFAULT_ALPHA_DB = DEFAULT_SIMULATIONS_DB.parent / "alpha.db"
-DEFAULT_LOG_DIR = DEFAULT_SIMULATIONS_DB.parent / "logs"
+DEFAULT_LOG_DIR = DEFAULT_ALPHA_DB.parent / "logs"
 
 EXIT_OK = 0
 EXIT_CONFIG = 2
@@ -78,8 +78,10 @@ class ReconcileStats:
     missing: int = 0
     # Rows the platform kept computing past the abandon window.
     abandoned: int = 0
-    # Expressions whose outcome is now known, so alpha.db can mark them as backtested.
-    resolved_expressions: list[str] = field(default_factory=list)
+    # Factors the platform judged (finished, or rejected the expression itself).
+    resolved_alpha_uids: list[str] = field(default_factory=list)
+    # Give-up rows (still computing, gone from the platform): the factor stays retryable.
+    interrupted_alpha_uids: list[str] = field(default_factory=list)
 
 
 def load_pending_alphas(
@@ -118,107 +120,26 @@ def _age_seconds(simulated_at: str | None) -> float:
     return max((datetime.now(timezone.utc) - started).total_seconds(), 0.0)
 
 
-def mark_simulated(alpha_db: Path | str, alpha_uids: Iterable[str], when: str | None = None) -> int:
-    """Flag alphas as backtested (any attempt, successful or not)."""
-    uids = list(alpha_uids)
-    if not uids:
-        return 0
-    connection = sqlite3.connect(str(alpha_db), timeout=60.0)
-    try:
-        connection.execute("PRAGMA busy_timeout = 60000")
-        updated = 0
-        timestamp = when or storage.utc_now()
-        for start in range(0, len(uids), 200):
-            batch = uids[start : start + 200]
-            cursor = connection.execute(
-                f"UPDATE alphas SET simulated = 1, simulated_at = ? "
-                f"WHERE alpha_uid IN ({','.join('?' * len(batch))}) AND simulated IS NULL",
-                [timestamp, *batch],
-            )
-            updated += cursor.rowcount
-        connection.commit()
-        return updated
-    finally:
-        connection.close()
-
-
-def purge_platform_errors(
-    *, simulations_db: Path | str, alpha_db: Path | str
-) -> tuple[int, int]:
+def purge_platform_errors(*, alpha_db: Path | str) -> tuple[int, int]:
     """Delete platform-caused failures and unmark their alphas.
 
     Returns ``(deleted_runs, unmarked_alphas)``.
     """
-    connection = storage.connect(simulations_db)
+    connection = storage.connect(alpha_db)
     try:
         rows = storage.platform_error_rows(connection)
         if not rows:
             return 0, 0
-        expressions = [row["expression"] for row in rows]
+        alpha_uids = [row["alpha_uid"] for row in rows]
         deleted = storage.delete_simulations(connection, [row["sim_uid"] for row in rows])
+        unmarked = storage.unmark_alpha_simulated(connection, alpha_uids)
     finally:
         connection.close()
 
-    unmarked = unmark_simulated_by_expression(alpha_db, expressions)
     logger.info(
         "purged %d platform-caused run(s); unmarked %d alpha(s)", deleted, unmarked
     )
     return deleted, unmarked
-
-
-def unmark_simulated_by_expression(
-    alpha_db: Path | str, expressions: Iterable[str]
-) -> int:
-    """Reset ``simulated`` for alphas whose run failed for platform reasons."""
-    unique = [text for text in dict.fromkeys(expressions) if text]
-    if not unique:
-        return 0
-    connection = sqlite3.connect(str(alpha_db), timeout=60.0)
-    try:
-        connection.execute("PRAGMA busy_timeout = 60000")
-        updated = 0
-        for start in range(0, len(unique), 200):
-            batch = unique[start : start + 200]
-            cursor = connection.execute(
-                f"UPDATE alphas SET simulated = NULL, simulated_at = NULL "
-                f"WHERE expression IN ({','.join('?' * len(batch))})",
-                batch,
-            )
-            updated += cursor.rowcount
-        connection.commit()
-        return updated
-    finally:
-        connection.close()
-
-
-def mark_simulated_by_expression(
-    alpha_db: Path | str, expressions: Iterable[str], when: str | None = None
-) -> int:
-    """Flag alphas as backtested using their expression text.
-
-    Recovered runs are keyed by expression because the leftover row only stores the
-    expression, not the alpha uid.
-    """
-    unique = [text for text in dict.fromkeys(expressions) if text]
-    if not unique:
-        return 0
-    connection = sqlite3.connect(str(alpha_db), timeout=60.0)
-    try:
-        connection.execute("PRAGMA busy_timeout = 60000")
-        timestamp = when or storage.utc_now()
-        updated = 0
-        for start in range(0, len(unique), 200):
-            batch = unique[start : start + 200]
-            cursor = connection.execute(
-                f"UPDATE alphas SET simulated = 1, simulated_at = ? "
-                f"WHERE simulated IS NULL AND expression IN ({','.join('?' * len(batch))})",
-                [timestamp, *batch],
-            )
-            updated += cursor.rowcount
-        connection.commit()
-        return updated
-    finally:
-        connection.close()
 
 
 class _ClientPool:
@@ -282,6 +203,7 @@ def reconcile_interrupted(
         settings = json.loads(row["settings_json"])
         base = {
             "sim_uid": sim_uid,
+            "alpha_uid": row["alpha_uid"],
             "expression": row["expression"],
             "settings": settings,
             "simulated_at": row["simulated_at"],
@@ -295,7 +217,7 @@ def reconcile_interrupted(
 
         if body is None:
             stats.missing += 1
-            stats.resolved_expressions.append(row["expression"])
+            stats.interrupted_alpha_uids.append(row["alpha_uid"])
             storage.write_outcome(
                 connection,
                 **base,
@@ -308,13 +230,19 @@ def reconcile_interrupted(
 
         status = str(body.get("status") or "").upper()
         if status in ("ERROR", "FAIL", "FAILED"):
+            message = str(body.get("message") or status)[:1000]
             stats.failed += 1
-            stats.resolved_expressions.append(row["expression"])
+            # Same rule as a live failure: only a factor-caused message means the factor
+            # was judged; a platform-side one leaves it retryable.
+            if storage.classify_error_text(message) == storage.ERROR_KIND_PLATFORM:
+                stats.interrupted_alpha_uids.append(row["alpha_uid"])
+            else:
+                stats.resolved_alpha_uids.append(row["alpha_uid"])
             storage.write_outcome(
                 connection,
                 **base,
                 completed=False,
-                error=str(body.get("message") or status)[:1000],
+                error=message,
                 simulation_body=body,
                 finished_at=storage.utc_now(),
             )
@@ -339,7 +267,7 @@ def reconcile_interrupted(
                 continue
 
             stats.abandoned += 1
-            stats.resolved_expressions.append(row["expression"])
+            stats.interrupted_alpha_uids.append(row["alpha_uid"])
             progress = body.get("progress")
             detail = f"progress={progress}" if progress is not None else "no progress reported"
             reason = "platform still computing" if waiting else "stalled"
@@ -357,7 +285,7 @@ def reconcile_interrupted(
         alpha_id = body.get("alpha")
         if not alpha_id:
             stats.missing += 1
-            stats.resolved_expressions.append(row["expression"])
+            stats.interrupted_alpha_uids.append(row["alpha_uid"])
             storage.write_outcome(
                 connection,
                 **base,
@@ -373,13 +301,13 @@ def reconcile_interrupted(
             connection,
             **base,
             completed=True,
-            alpha_id=str(alpha_id),
+            braint_alpha_id=str(alpha_id),
             finished_at=storage.utc_now(),
             simulation_body=body,
             alpha_body=alpha_body,
         )
         stats.recovered += 1
-        stats.resolved_expressions.append(row["expression"])
+        stats.resolved_alpha_uids.append(row["alpha_uid"])
         logger.info("%s: recovered result for alpha %s", sim_uid, alpha_id)
 
     logger.info(
@@ -419,7 +347,6 @@ def run_batch(
     *,
     settings: SimulationSettings,
     workers: int,
-    simulations_db: Path | str = DEFAULT_SIMULATIONS_DB,
     alpha_db: Path | str = DEFAULT_ALPHA_DB,
     timeout: float = 900.0,
     credentials_path: Path | str | None = None,
@@ -431,7 +358,7 @@ def run_batch(
         return stats
 
     # Initialise the schema once; workers then open cheap connections.
-    storage.connect(simulations_db).close()
+    storage.connect(alpha_db).close()
     credentials = load_credentials(credentials_path)
     pool = _ClientPool(credentials, poll_timeout=timeout, max_submit_retries=60)
     started = time.monotonic()
@@ -456,7 +383,7 @@ def run_batch(
         return run_simulation(
             alpha.expression,
             settings,
-            db_path=simulations_db,
+            db_path=alpha_db,
             timeout=timeout,
             client=pool.client,
             initialize_db=False,
@@ -478,9 +405,9 @@ def run_batch(
                 if outcome is not None:
                     bucket = outcome_bucket(outcome)
                     if bucket == "ok":
+                        # run_simulation already flags the factor as backtested.
                         stats.ok += 1
                         consecutive_platform = 0
-                        mark_simulated(alpha_db, [alpha.alpha_uid])
                     elif bucket == "pending":
                         # Still computing upstream; the row stays a placeholder and the
                         # alpha is not marked, so the next pass can finish the job.
@@ -492,7 +419,6 @@ def run_batch(
                         stats.failed += 1
                         stats.failures.append((alpha.alpha_uid, outcome.error or "failed"))
                         consecutive_platform = 0
-                        mark_simulated(alpha_db, [alpha.alpha_uid])
                     else:
                         # Platform-side problem (quota, session, server): the factor was
                         # never evaluated, so leave it pending for the next run.
@@ -570,8 +496,18 @@ def build_parser() -> argparse.ArgumentParser:
         prog="worldquant_consultant_project.simulation.batch",
         description="Backtest every un-simulated alpha from alpha.db with a thread pool.",
     )
-    parser.add_argument("--alpha-db", type=Path, default=DEFAULT_ALPHA_DB, help="alpha database")
-    parser.add_argument("--db", type=Path, default=DEFAULT_SIMULATIONS_DB, help="results database")
+    parser.add_argument(
+        "--alpha-db",
+        type=Path,
+        default=DEFAULT_ALPHA_DB,
+        help="factor database that also stores the backtests",
+    )
+    parser.add_argument(
+        "--db",
+        type=Path,
+        default=None,
+        help="deprecated alias for --alpha-db (kept so old commands keep working)",
+    )
     parser.add_argument("--settings", type=Path, default=DEFAULT_SETTINGS_PATH, help="simulation_setting.json")
     parser.add_argument(
         "--concurrency-file",
@@ -618,15 +554,14 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _run_reconcile(args: argparse.Namespace) -> ReconcileStats | None:
-    """Open both databases and finalise rows left by an interrupted run."""
+    """Open the factor database and finalise rows left by an interrupted run."""
     try:
         credentials = load_credentials(args.credentials)
     except CredentialsError as exc:
         logger.error("%s", exc)
         return None
 
-    storage.connect(args.db).close()
-    connection = storage.connect(args.db, initialize=False)
+    connection = storage.connect(args.alpha_db)
     client = BrainSimulationClient(credentials)
     try:
         stats = reconcile_interrupted(
@@ -635,6 +570,10 @@ def _run_reconcile(args: argparse.Namespace) -> ReconcileStats | None:
             stale_after_seconds=max(args.stale_minutes, 0) * 60,
             abandon_after_seconds=max(args.abandon_after_hours, 0) * 3600,
         )
+        marked = storage.mark_alpha_simulated
+        for uid in stats.resolved_alpha_uids:
+            marked(connection, uid)
+        connection.commit()
     except BrainSimulationError as exc:
         logger.error("cannot reconcile interrupted rows: %s", exc)
         return None
@@ -642,14 +581,24 @@ def _run_reconcile(args: argparse.Namespace) -> ReconcileStats | None:
         client.close()
         connection.close()
 
-    marked = mark_simulated_by_expression(args.alpha_db, stats.resolved_expressions)
-    if marked:
-        logger.info("marked %d alpha(s) as backtested after reconciliation", marked)
+    if stats.resolved_alpha_uids:
+        logger.info(
+            "marked %d alpha(s) as backtested after reconciliation",
+            len(stats.resolved_alpha_uids),
+        )
+    if stats.interrupted_alpha_uids:
+        logger.info(
+            "%d alpha(s) left unmarked so they stay retryable (no verdict from the platform)",
+            len(stats.interrupted_alpha_uids),
+        )
     return stats
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.db is not None:
+        logger.warning("--db is deprecated (backtests live in alpha.db); use --alpha-db")
+        args.alpha_db = args.db
     log_path = setup_logging(args.log_level, args.log_dir)
     if log_path:
         logger.info("logging to %s", log_path)
@@ -675,7 +624,7 @@ def main(argv: list[str] | None = None) -> int:
         settings.payload,
         workers,
         len(pending),
-        args.db,
+        args.alpha_db,
     )
 
     if args.dry_run:
@@ -687,9 +636,7 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT_OK
 
     if args.purge_platform_errors:
-        deleted, unmarked = purge_platform_errors(
-            simulations_db=args.db, alpha_db=args.alpha_db
-        )
+        deleted, unmarked = purge_platform_errors(alpha_db=args.alpha_db)
         print(f"deleted {deleted} platform-caused run(s); unmarked {unmarked} alpha(s)")
         return EXIT_OK
 
@@ -722,7 +669,6 @@ def main(argv: list[str] | None = None) -> int:
             pending,
             settings=settings,
             workers=workers,
-            simulations_db=args.db,
             alpha_db=args.alpha_db,
             timeout=args.timeout,
             credentials_path=args.credentials,
@@ -748,12 +694,12 @@ def main(argv: list[str] | None = None) -> int:
     if len(stats.failures) > 10:
         print(f"  ... and {len(stats.failures) - 10} more failures")
 
-    connection = storage.connect(args.db, initialize=False)
+    connection = storage.connect(args.alpha_db, initialize=False)
     try:
         remaining = connection.execute(
-            "SELECT COUNT(*) FROM simulations WHERE completed = 0"
+            f"SELECT COUNT(*) FROM {storage.SIMULATIONS_TABLE} WHERE completed = 0"
         ).fetchone()[0]
-        print(f"rows in {args.db.name}: incomplete={remaining}")
+        print(f"rows in {args.alpha_db.name}: incomplete={remaining}")
     finally:
         connection.close()
 

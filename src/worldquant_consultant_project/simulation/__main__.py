@@ -1,4 +1,4 @@
-"""CLI: backtest one Fast Expression factor and store the result in SQLite.
+"""CLI: backtest one Fast Expression factor and store the result in ``alpha.db``.
 
 Usage:
     uv run python -m worldquant_consultant_project.simulation --expression "rank(close)"
@@ -30,7 +30,7 @@ DEFAULT_LOG_DIR = DEFAULT_DB_PATH.parent / "logs"
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="worldquant_consultant_project.simulation",
-        description="Backtest a WorldQuant BRAIN Fast Expression factor and store it in simulations.db.",
+        description="Backtest a WorldQuant BRAIN Fast Expression factor and store it in alpha.db.",
     )
     parser.add_argument("--expression", required=True, help="Fast Expression factor, e.g. \"rank(ts_delta(close, 5))\"")
     parser.add_argument("--region", default=None, help="default USA")
@@ -87,9 +87,10 @@ def _settings_from_args(args: argparse.Namespace) -> SimulationSettings:
 def print_outcome(outcome) -> None:
     print(f"status      : {outcome.status}")
     print(f"sim_uid     : {outcome.sim_uid}")
+    print(f"alpha_uid   : {outcome.alpha_uid}")
     print(f"expression  : {outcome.expression}")
     if outcome.alpha_id:
-        print(f"alpha_id    : {outcome.alpha_id}")
+        print(f"braint_alpha: {outcome.alpha_id}")
     if outcome.duration_seconds is not None:
         print(f"duration    : {outcome.duration_seconds:.1f}s")
     if outcome.error:
@@ -100,7 +101,7 @@ def print_outcome(outcome) -> None:
         summary = ", ".join(f"{key}={metrics.get(key)}" for key in keys if key in metrics)
         print(f"in-sample   : {summary}")
     if outcome.submittable is not None:
-        print(f"submittable : {outcome.submittable}" + (f" (blockers: {len(outcome.submit_blockers or [])})" if outcome.submit_blockers else ""))
+        print(f"tentative   : {outcome.submittable}")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -148,7 +149,7 @@ def main(argv: list[str] | None = None) -> int:
                 print(
                     f"  {row['simulated_at']}  {state:<6} sharpe={row['is_sharpe']}  "
                     f"fitness={row['is_fitness']}  turnover={row['is_turnover']}  "
-                    f"alpha={row['alpha_id']}  {row['duration_seconds']}s"
+                    f"braint_alpha={row['braint_alpha_id']}  {row['duration_seconds']}s"
                 )
     finally:
         connection.close()

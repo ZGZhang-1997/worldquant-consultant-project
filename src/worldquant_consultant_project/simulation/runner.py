@@ -23,16 +23,18 @@ from .settings import SimulationSettings
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_DB_PATH = DEFAULT_DATA_DIR / "simulations.db"
+# Backtests live next to the factors they belong to.
+DEFAULT_DB_PATH = DEFAULT_DATA_DIR / "alpha.db"
 
 
 @dataclass
 class SimulationOutcome:
-    """Result of one backtest, mirroring the row stored in ``simulations``."""
+    """Result of one backtest, mirroring the row stored in ``alpha_simulations``."""
 
     sim_uid: str
     expression: str
     status: str
+    alpha_uid: str | None = None
     alpha_id: str | None = None
     braint_sim_id: str | None = None
     error: str | None = None
@@ -105,10 +107,15 @@ def run_simulation(
     if client is None:
         client = BrainSimulationClient(load_credentials(credentials_path), poll_timeout=timeout)
 
+    # Every run hangs off a factor; an unknown expression is registered on the fly so the
+    # result is reachable by alpha_uid like any template-generated alpha.
+    alpha_uid, alpha_created = storage.ensure_alpha(connection, expression)
+
     outcome = SimulationOutcome(
         sim_uid=sim_uid,
         expression=expression,
         status="failed",
+        alpha_uid=alpha_uid,
         settings=resolved.stored,
     )
     location: str | None = None
@@ -121,6 +128,7 @@ def run_simulation(
         storage.write_outcome(
             connection,
             sim_uid=sim_uid,
+            alpha_uid=alpha_uid,
             expression=expression,
             settings=resolved.stored,
             completed=False,
@@ -179,18 +187,24 @@ def run_simulation(
             # Do not keep anything for platform failures: the row would look like a
             # backtested factor and the run could never be retried cleanly.
             storage.delete_simulations(connection, [sim_uid])
+            if alpha_created:
+                # The factor was only registered for this attempt; drop it again so it is
+                # not mistaken for a pending alpha.
+                connection.execute("DELETE FROM alphas WHERE alpha_uid = ?", (alpha_uid,))
+                connection.commit()
             connection.commit()
         else:
             storage.write_outcome(
                 connection,
                 sim_uid=sim_uid,
+                alpha_uid=alpha_uid,
                 expression=expression,
                 settings=resolved.stored,
                 completed=outcome.ok,
                 simulated_at=simulated_at,
                 duration_seconds=outcome.duration_seconds,
                 braint_sim_id=outcome.braint_sim_id,
-                alpha_id=outcome.alpha_id,
+                braint_alpha_id=outcome.alpha_id,
                 error=outcome.error,
                 error_kind="factor" if outcome.error else None,
                 # A pending run keeps finished_at empty so it still looks like a placeholder.
@@ -200,6 +214,10 @@ def run_simulation(
                 simulation_body=simulation_body,
                 alpha_body=alpha_body,
             )
+            if outcome.ok or outcome.factor_caused:
+                # The platform judged this factor, so it counts as backtested. Pending and
+                # platform failures leave the flag alone so the factor is retried later.
+                storage.mark_alpha_simulated(connection, alpha_uid)
         connection.close()
 
     if outcome.ok:
@@ -213,5 +231,5 @@ def run_simulation(
 
 
 def connect(db_path: Path | str | None = None) -> sqlite3.Connection:
-    """Open the simulations database without running anything."""
+    """Open the factor database (which also holds the backtest tables)."""
     return storage.connect(db_path or DEFAULT_DB_PATH)

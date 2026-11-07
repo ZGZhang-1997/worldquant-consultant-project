@@ -1,9 +1,11 @@
-"""SQLite persistence for simulation runs.
+"""Simulation persistence, attached to the factor database (``data/alpha.db``).
 
-Two tables only:
-``simulations``        one row per backtest: id, expression, settings JSON, completion,
-                       timing, every in-sample metric and one column per submission check.
-``simulation_details`` the 1:1 side table with identifiers, errors, other samples and raw payloads.
+Each backtest hangs off the factor it belongs to, so one ``alpha_uid`` finds every run
+made for that factor (possibly several, with different settings):
+
+``alpha_simulations``          one row per backtest: settings, completion, timing,
+                               every in-sample metric and one column per submission check.
+``alpha_simulation_details``   1:1 side table: BRAIN ids, errors, other samples, raw payloads.
 """
 
 from __future__ import annotations
@@ -11,9 +13,14 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
+
+from ..acquisition.config import DEFAULT_DATA_DIR
+
+DEFAULT_DB_PATH = DEFAULT_DATA_DIR / "alpha.db"
 
 # In-sample metric columns: ``<column>`` holds ``is.<source>``.
 IS_METRICS: tuple[tuple[str, str, str], ...] = (
@@ -43,8 +50,12 @@ TENTATIVE_COLUMN = "tentative_submittable"
 # Bumped whenever the tentative rule changes so existing rows get recomputed.
 TENTATIVE_RULE_VERSION = "2"
 
+SIMULATIONS_TABLE = "alpha_simulations"
+DETAILS_TABLE = "alpha_simulation_details"
+
 MAIN_COLUMNS: tuple[str, ...] = (
     "sim_uid",
+    "alpha_uid",
     "expression",
     TENTATIVE_COLUMN,
     "settings_json",
@@ -55,7 +66,8 @@ MAIN_COLUMNS: tuple[str, ...] = (
 
 DETAIL_COLUMNS: tuple[str, ...] = (
     "sim_uid",
-    "alpha_id",
+    "alpha_uid",
+    "braint_alpha_id",
     "braint_sim_id",
     "error",
     "error_kind",
@@ -71,23 +83,35 @@ DETAIL_COLUMNS: tuple[str, ...] = (
 ERROR_KIND_FACTOR = "factor"
 ERROR_KIND_PLATFORM = "platform"
 
+_ALPHAS_TABLE = """
+CREATE TABLE IF NOT EXISTS alphas (
+    alpha_uid    TEXT PRIMARY KEY,
+    expression   TEXT NOT NULL,
+    simulated    INTEGER,
+    simulated_at TEXT
+);
+"""
+
 _SIMULATIONS_TABLE = """
 CREATE TABLE IF NOT EXISTS {table} (
     sim_uid          TEXT PRIMARY KEY,
+    alpha_uid        TEXT NOT NULL,
     expression       TEXT NOT NULL,
     tentative_submittable INTEGER NOT NULL DEFAULT 0,
     settings_json    TEXT NOT NULL,
     completed        INTEGER NOT NULL DEFAULT 0,
     simulated_at     TEXT NOT NULL,
     duration_seconds REAL,
-    {metric_columns}
+    {metric_columns},
+    FOREIGN KEY (alpha_uid) REFERENCES alphas (alpha_uid) ON DELETE CASCADE
 );
 """
 
 _DETAILS_TABLE = """
-CREATE TABLE IF NOT EXISTS simulation_details (
+CREATE TABLE IF NOT EXISTS {table} (
     sim_uid             TEXT PRIMARY KEY,
-    alpha_id            TEXT,
+    alpha_uid           TEXT NOT NULL,
+    braint_alpha_id     TEXT,
     braint_sim_id       TEXT,
     error               TEXT,
     error_kind          TEXT,
@@ -97,7 +121,8 @@ CREATE TABLE IF NOT EXISTS simulation_details (
     checks_json         TEXT,
     raw_simulation_json TEXT,
     raw_alpha_json      TEXT,
-    FOREIGN KEY (sim_uid) REFERENCES simulations (sim_uid) ON DELETE CASCADE
+    FOREIGN KEY (sim_uid) REFERENCES alpha_simulations (sim_uid) ON DELETE CASCADE,
+    FOREIGN KEY (alpha_uid) REFERENCES alphas (alpha_uid) ON DELETE CASCADE
 );
 """
 
@@ -107,16 +132,24 @@ CREATE TABLE IF NOT EXISTS schema_meta (
     value TEXT NOT NULL
 );
 
-CREATE INDEX IF NOT EXISTS idx_simulations_simulated ON simulations (simulated_at);
-CREATE INDEX IF NOT EXISTS idx_details_alpha ON simulation_details (alpha_id);
+-- Lookups by factor are the main access path.
+CREATE INDEX IF NOT EXISTS idx_alphas_expression
+    ON alphas (expression);
+CREATE INDEX IF NOT EXISTS idx_alpha_simulations_alpha
+    ON alpha_simulations (alpha_uid);
+CREATE INDEX IF NOT EXISTS idx_alpha_simulations_simulated
+    ON alpha_simulations (simulated_at);
+CREATE INDEX IF NOT EXISTS idx_alpha_simulation_details_braint
+    ON alpha_simulation_details (braint_alpha_id);
 
 -- Same expression with the same settings is one logical run: a re-run overwrites it.
-CREATE UNIQUE INDEX IF NOT EXISTS uq_simulations_expression_settings
-    ON simulations (expression, settings_json);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_alpha_simulations_expression_settings
+    ON alpha_simulations (expression, settings_json);
 
-DROP VIEW IF EXISTS v_simulation_summary;
-CREATE VIEW v_simulation_summary AS
+DROP VIEW IF EXISTS v_alpha_simulation_summary;
+CREATE VIEW v_alpha_simulation_summary AS
 SELECT s.sim_uid,
+       s.alpha_uid,
        s.expression,
        s.tentative_submittable,
        s.completed,
@@ -125,17 +158,18 @@ SELECT s.sim_uid,
        s.is_sharpe,
        s.is_fitness,
        s.is_turnover,
-       d.alpha_id
-FROM simulations AS s
-LEFT JOIN simulation_details AS d ON d.sim_uid = s.sim_uid
-ORDER BY s.simulated_at DESC;
+       det.braint_alpha_id
+FROM alpha_simulations AS s
+LEFT JOIN alpha_simulation_details AS det ON det.sim_uid = s.sim_uid;
 """
 
-
-def _base_schema() -> str:
+def _schema() -> str:
     return (
-        _SIMULATIONS_TABLE.format(table="simulations", metric_columns=_metric_column_sql())
-        + _DETAILS_TABLE
+        _ALPHAS_TABLE
+        + _SIMULATIONS_TABLE.format(
+            table=SIMULATIONS_TABLE, metric_columns=_metric_column_sql()
+        )
+        + _DETAILS_TABLE.format(table=DETAILS_TABLE)
         + _INDEXES_AND_VIEW
     )
 
@@ -186,31 +220,13 @@ def _metric_column_sql() -> str:
     return ",\n    ".join(f"{column} {kind}" for column, _, kind in IS_METRICS)
 
 
-def _needs_rebuild(connection: sqlite3.Connection) -> bool:
-    """The pre-simplification table had 122 columns and no ``completed`` flag."""
-    columns = {row["name"] for row in connection.execute("PRAGMA table_info(simulations)")}
-    return bool(columns) and "completed" not in columns
+def connect(path: Path | str | None = None, *, initialize: bool = True) -> sqlite3.Connection:
+    """Open the factor database and make sure the simulation tables exist.
 
-
-def _rename_legacy_timestamp(connection: sqlite3.Connection) -> bool:
-    """Rename ``submitted_at`` to ``simulated_at``: the timestamp marks the run start."""
-    columns = {row["name"] for row in connection.execute("PRAGMA table_info(simulations)")}
-    if "submitted_at" not in columns or "simulated_at" in columns:
-        return False
-    connection.execute("DROP VIEW IF EXISTS v_simulation_summary")
-    connection.execute("ALTER TABLE simulations RENAME COLUMN submitted_at TO simulated_at")
-    connection.execute("DROP INDEX IF EXISTS idx_simulations_submitted")
-    connection.commit()
-    return True
-
-
-def connect(path: Path | str, *, initialize: bool = True) -> sqlite3.Connection:
-    """Open the simulations database.
-
-    ``initialize=False`` skips the schema/migration work, which is what worker threads
-    want: the batch runner initialises once up front, then each worker opens cheaply.
+    ``initialize=False`` skips the schema work, which is what worker threads want: the
+    batch runner initialises once up front, then each worker opens cheaply.
     """
-    db_path = Path(path)
+    db_path = Path(path) if path else DEFAULT_DB_PATH
     db_path.parent.mkdir(parents=True, exist_ok=True)
     connection = sqlite3.connect(str(db_path), timeout=60.0)
     connection.row_factory = sqlite3.Row
@@ -219,20 +235,8 @@ def connect(path: Path | str, *, initialize: bool = True) -> sqlite3.Connection:
     connection.execute("PRAGMA foreign_keys = ON")
     if not initialize:
         return connection
-    if _needs_rebuild(connection):
-        # The simplified layout starts empty: old wide tables are dropped on purpose.
-        connection.executescript(
-            "DROP VIEW IF EXISTS v_simulation_summary;"
-            "DROP TABLE IF EXISTS simulation_details;"
-            "DROP TABLE IF EXISTS simulations;"
-            "DROP TABLE IF EXISTS simulation_results;"
-            "DROP TABLE IF EXISTS simulation_metrics;"
-            "DROP TABLE IF EXISTS simulation_checks;"
-        )
-    _rename_legacy_timestamp(connection)
-    # The view references tentative_submittable, so any table rebuild must happen first.
-    if not _insert_tentative_column(connection):
-        connection.executescript(_base_schema())
+
+    connection.executescript(_schema())
     _ensure_error_kind(connection)
     _refresh_tentative(connection)
     connection.commit()
@@ -240,19 +244,20 @@ def connect(path: Path | str, *, initialize: bool = True) -> sqlite3.Connection:
 
 
 def _ensure_error_kind(connection: sqlite3.Connection) -> int:
-    """Add ``simulation_details.error_kind`` and classify rows written before it existed."""
-    columns = {row["name"] for row in connection.execute("PRAGMA table_info(simulation_details)")}
+    """Add ``error_kind`` if missing and classify rows that lack it."""
+    columns = {row["name"] for row in connection.execute(f"PRAGMA table_info({DETAILS_TABLE})")}
     if "error_kind" not in columns:
-        connection.execute("ALTER TABLE simulation_details ADD COLUMN error_kind TEXT")
+        connection.execute(f"ALTER TABLE {DETAILS_TABLE} ADD COLUMN error_kind TEXT")
         connection.commit()
 
     unclassified = connection.execute(
-        "SELECT sim_uid, error FROM simulation_details WHERE error IS NOT NULL AND error_kind IS NULL"
+        f"SELECT sim_uid, error FROM {DETAILS_TABLE} "
+        "WHERE error IS NOT NULL AND error_kind IS NULL"
     ).fetchall()
     if not unclassified:
         return 0
     connection.executemany(
-        "UPDATE simulation_details SET error_kind = ? WHERE sim_uid = ?",
+        f"UPDATE {DETAILS_TABLE} SET error_kind = ? WHERE sim_uid = ?",
         [(classify_error_text(row["error"]), row["sim_uid"]) for row in unclassified],
     )
     connection.commit()
@@ -267,11 +272,13 @@ def _refresh_tentative(connection: sqlite3.Connection) -> int:
     if row is not None and row[0] == TENTATIVE_RULE_VERSION:
         return 0
 
-    columns = [item["name"] for item in connection.execute("PRAGMA table_info(simulations)")]
+    columns = [
+        item["name"] for item in connection.execute(f"PRAGMA table_info({SIMULATIONS_TABLE})")
+    ]
     if not columns:
         return 0
     updated = connection.execute(
-        f"UPDATE simulations SET {TENTATIVE_COLUMN} = {_tentative_sql(columns)}"
+        f"UPDATE {SIMULATIONS_TABLE} SET {TENTATIVE_COLUMN} = {_tentative_sql(columns)}"
     ).rowcount
     connection.execute(
         "INSERT INTO schema_meta (key, value) VALUES ('tentative_rule', ?) "
@@ -282,57 +289,66 @@ def _refresh_tentative(connection: sqlite3.Connection) -> int:
     return updated
 
 
-def _insert_tentative_column(connection: sqlite3.Connection) -> bool:
-    """Rebuild the table so ``tentative_submittable`` sits right after ``expression``.
+def ensure_alpha(connection: sqlite3.Connection, expression: str) -> tuple[str, bool]:
+    """Return ``(alpha_uid, created)`` for an expression, registering it when unknown.
 
-    SQLite can only append columns, and the wide-table layout already shipped without
-    it, so the existing rows are copied into a fresh table with the wanted order.
+    Ad-hoc expressions run outside the template pipeline still get an ``alpha_uid`` so
+    their backtests are reachable the same way as generated factors.
     """
-    columns = [row["name"] for row in connection.execute("PRAGMA table_info(simulations)")]
-    if not columns or TENTATIVE_COLUMN in columns:
-        return False
-
-    existing = set(columns)
-    all_check_columns = [name for name in columns if name.startswith(CHECK_COLUMN_PREFIX)]
-    copy_columns = [
-        name
-        for name in MAIN_COLUMNS + tuple(all_check_columns)
-        if name != TENTATIVE_COLUMN and name in existing
-    ]
-    tentative_sql = _tentative_sql(all_check_columns)
-
+    row = connection.execute(
+        "SELECT alpha_uid FROM alphas WHERE expression = ? ORDER BY alpha_uid LIMIT 1",
+        (expression,),
+    ).fetchone()
+    if row is not None:
+        return str(row["alpha_uid"]), False
+    alpha_uid = uuid.uuid4().hex
+    connection.execute(
+        "INSERT INTO alphas (alpha_uid, expression, simulated, simulated_at) VALUES (?, ?, NULL, NULL)",
+        (alpha_uid, expression),
+    )
     connection.commit()
-    connection.execute("PRAGMA foreign_keys = OFF")
-    try:
-        connection.executescript(
-            "DROP VIEW IF EXISTS v_simulation_summary;"
-            "DROP TABLE IF EXISTS simulations_new;"
-        )
-        connection.executescript(
-            _SIMULATIONS_TABLE.format(
-                table="simulations_new", metric_columns=_metric_column_sql()
-            )
-        )
-        ensure_check_columns(
-            connection,
-            [name[len(CHECK_COLUMN_PREFIX):] for name in columns if name.startswith(CHECK_COLUMN_PREFIX)],
-            table="simulations_new",
-        )
-        connection.execute(
-            f"INSERT INTO simulations_new ({', '.join(copy_columns + [TENTATIVE_COLUMN])}) "
-            f"SELECT {', '.join(copy_columns)}, {tentative_sql} FROM simulations"
-        )
-        connection.execute("DROP TABLE simulations")
-        connection.execute("ALTER TABLE simulations_new RENAME TO simulations")
-        connection.executescript(_base_schema())
-        connection.commit()
-    finally:
-        connection.execute("PRAGMA foreign_keys = ON")
-    return True
+    return alpha_uid, True
+
+
+def find_alpha_uid(connection: sqlite3.Connection, expression: str) -> str | None:
+    row = connection.execute(
+        "SELECT alpha_uid FROM alphas WHERE expression = ? ORDER BY alpha_uid LIMIT 1",
+        (expression,),
+    ).fetchone()
+    return str(row["alpha_uid"]) if row else None
+
+
+def mark_alpha_simulated(
+    connection: sqlite3.Connection, alpha_uid: str, when: str | None = None
+) -> int:
+    """Flag the factor as backtested."""
+    updated = connection.execute(
+        "UPDATE alphas SET simulated = 1, simulated_at = ? WHERE alpha_uid = ?",
+        (when or utc_now(), alpha_uid),
+    ).rowcount
+    connection.commit()
+    return updated
+
+
+def unmark_alpha_simulated(connection: sqlite3.Connection, alpha_uids: Iterable[str]) -> int:
+    """Reset the backtested flag so the factor is picked up again."""
+    uids = [uid for uid in dict.fromkeys(alpha_uids) if uid]
+    if not uids:
+        return 0
+    updated = 0
+    for start in range(0, len(uids), 200):
+        batch = uids[start : start + 200]
+        updated += connection.execute(
+            f"UPDATE alphas SET simulated = NULL, simulated_at = NULL "
+            f"WHERE alpha_uid IN ({','.join('?' * len(batch))})",
+            batch,
+        ).rowcount
+    connection.commit()
+    return updated
 
 
 def ensure_check_columns(
-    connection: sqlite3.Connection, names: Iterable[str], *, table: str = "simulations"
+    connection: sqlite3.Connection, names: Iterable[str], *, table: str = SIMULATIONS_TABLE
 ) -> list[str]:
     """Add one column per newly seen submission check. Idempotent."""
     existing = {row["name"] for row in connection.execute(f"PRAGMA table_info({table})")}
@@ -355,7 +371,9 @@ def ensure_check_columns(
 
 
 def known_check_columns(connection: sqlite3.Connection) -> list[str]:
-    columns = [row["name"] for row in connection.execute("PRAGMA table_info(simulations)")]
+    columns = [
+        row["name"] for row in connection.execute(f"PRAGMA table_info({SIMULATIONS_TABLE})")
+    ]
     return [column for column in columns if column.startswith(CHECK_COLUMN_PREFIX)]
 
 
@@ -416,10 +434,7 @@ def _tentative_sql(check_columns: Sequence[str]) -> str:
 
 
 def derive_submittable(alpha: Mapping[str, Any] | None) -> tuple[int | None, list[dict[str, Any]]]:
-    """Whether BRAIN would accept the alpha, plus the blocking checks.
-
-    Kept as a helper for callers/reporting; the database derives it from the check columns.
-    """
+    """Whether BRAIN would accept the alpha, plus the blocking checks."""
     checks = _checks(alpha)
     if not checks:
         return None, []
@@ -439,12 +454,13 @@ def derive_submittable(alpha: Mapping[str, Any] | None) -> tuple[int | None, lis
 def build_rows(
     *,
     sim_uid: str,
+    alpha_uid: str,
     expression: str,
     settings: Mapping[str, Any],
     completed: bool,
     simulated_at: str,
     duration_seconds: float | None = None,
-    alpha_id: str | None = None,
+    braint_alpha_id: str | None = None,
     braint_sim_id: str | None = None,
     error: str | None = None,
     error_kind: str | None = None,
@@ -452,11 +468,12 @@ def build_rows(
     simulation_body: Mapping[str, Any] | None = None,
     alpha_body: Mapping[str, Any] | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Build the main row and its side-table row for one backtest."""
+    """Build the simulation row and its side-table row for one backtest."""
     block = _is_block(alpha_body)
     checks = check_values(alpha_body)
     main: dict[str, Any] = {
         "sim_uid": sim_uid,
+        "alpha_uid": alpha_uid,
         "expression": expression,
         TENTATIVE_COLUMN: tentative_submittable(checks),
         "settings_json": settings_json(settings),
@@ -483,7 +500,8 @@ def build_rows(
     }
     details: dict[str, Any] = {
         "sim_uid": sim_uid,
-        "alpha_id": alpha_id,
+        "alpha_uid": alpha_uid,
+        "braint_alpha_id": braint_alpha_id,
         "braint_sim_id": braint_sim_id,
         "error": error,
         "error_kind": error_kind or (classify_error_text(error) if error else None),
@@ -509,17 +527,18 @@ def find_sim_uid(
 ) -> str | None:
     """The uid of an existing run with the same expression and settings, if any."""
     row = connection.execute(
-        "SELECT sim_uid FROM simulations WHERE expression = ? AND settings_json = ?",
+        f"SELECT sim_uid FROM {SIMULATIONS_TABLE} WHERE expression = ? AND settings_json = ?",
         (expression, settings_text),
     ).fetchone()
     return str(row[0]) if row else None
 
 
 def write_outcome(connection: sqlite3.Connection, **kwargs: Any) -> None:
-    """Insert or update one backtest (main row + side row), adding check columns as needed.
+    """Insert or update one backtest (row + side row), adding check columns as needed.
 
-    A row is identified by ``(expression, settings_json)``: re-running the same expression
-    with the same settings overwrites the previous result but keeps its ``sim_uid``.
+    A run is identified by ``(expression, settings_json)``: re-running the same expression
+    with the same settings overwrites the previous result but keeps its ``sim_uid``. The
+    same factor may hold several rows with different settings.
     """
     main, details = build_rows(**kwargs)
     existing = find_sim_uid(connection, main["expression"], main["settings_json"])
@@ -534,7 +553,7 @@ def write_outcome(connection: sqlite3.Connection, **kwargs: Any) -> None:
     placeholders = ", ".join(f":{name}" for name in main_columns)
     updates = ", ".join(f"{name} = excluded.{name}" for name in main_columns if name != "sim_uid")
     connection.execute(
-        f"INSERT INTO simulations ({', '.join(main_columns)}) VALUES ({placeholders})"
+        f"INSERT INTO {SIMULATIONS_TABLE} ({', '.join(main_columns)}) VALUES ({placeholders})"
         f" ON CONFLICT (sim_uid) DO UPDATE SET {updates}",
         main,
     )
@@ -543,8 +562,8 @@ def write_outcome(connection: sqlite3.Connection, **kwargs: Any) -> None:
         f"{name} = excluded.{name}" for name in DETAIL_COLUMNS if name != "sim_uid"
     )
     connection.execute(
-        f"INSERT INTO simulation_details ({', '.join(DETAIL_COLUMNS)}) VALUES ({detail_placeholders})"
-        f" ON CONFLICT (sim_uid) DO UPDATE SET {detail_updates}",
+        f"INSERT INTO {DETAILS_TABLE} ({', '.join(DETAIL_COLUMNS)}) "
+        f"VALUES ({detail_placeholders}) ON CONFLICT (sim_uid) DO UPDATE SET {detail_updates}",
         details,
     )
     connection.commit()
@@ -553,24 +572,34 @@ def write_outcome(connection: sqlite3.Connection, **kwargs: Any) -> None:
 # -------------------------------------------------------------------- reading
 
 
-def summary_columns(connection: sqlite3.Connection) -> list[str]:
-    return [
-        "sim_uid",
-        "expression",
-        "completed",
-        "simulated_at",
-        "duration_seconds",
-        "is_sharpe",
-        "is_fitness",
-        "is_turnover",
-        "alpha_id",
-    ]
-
-
 def recent(connection: sqlite3.Connection, limit: int = 10) -> list[sqlite3.Row]:
+    """Newest backtests across all factors."""
     return list(
         connection.execute(
-            "SELECT * FROM v_simulation_summary LIMIT ?", (limit,)
+            "SELECT * FROM v_alpha_simulation_summary "
+            "ORDER BY simulated_at DESC LIMIT ?",
+            (limit,),
+        )
+    )
+
+
+def runs_for_alpha(connection: sqlite3.Connection, alpha_uid: str) -> list[sqlite3.Row]:
+    """Every backtest recorded for one factor, newest first (all columns included)."""
+    return list(
+        connection.execute(
+            f"""
+            SELECT s.*,
+                   d.braint_alpha_id,
+                   d.braint_sim_id,
+                   d.error,
+                   d.error_kind,
+                   d.finished_at
+            FROM {SIMULATIONS_TABLE} AS s
+            LEFT JOIN {DETAILS_TABLE} AS d USING (sim_uid)
+            WHERE s.alpha_uid = ?
+            ORDER BY s.simulated_at DESC
+            """,
+            (alpha_uid,),
         )
     )
 
@@ -579,16 +608,43 @@ def platform_error_rows(connection: sqlite3.Connection) -> list[sqlite3.Row]:
     """Failed runs whose failure came from the platform, so the factor was never judged."""
     return list(
         connection.execute(
-            """
-            SELECT s.sim_uid, s.expression, d.error
-            FROM simulations AS s
-            JOIN simulation_details AS d ON d.sim_uid = s.sim_uid
+            f"""
+            SELECT s.sim_uid, s.alpha_uid, s.expression, d.error
+            FROM {SIMULATIONS_TABLE} AS s
+            JOIN {DETAILS_TABLE} AS d ON d.sim_uid = s.sim_uid
             WHERE s.completed = 0
               AND d.error IS NOT NULL
               AND d.error_kind = ?
             ORDER BY s.simulated_at
             """,
             (ERROR_KIND_PLATFORM,),
+        )
+    )
+
+
+def pending_placeholders(connection: sqlite3.Connection) -> list[sqlite3.Row]:
+    """Rows written at submit time whose final result was never stored.
+
+    This happens when the process is stopped while the platform is still computing:
+    the row keeps ``braint_sim_id`` but has no error, result or completion time.
+    """
+    return list(
+        connection.execute(
+            f"""
+            SELECT s.sim_uid,
+                   s.alpha_uid,
+                   s.expression,
+                   s.settings_json,
+                   s.simulated_at,
+                   d.braint_sim_id
+            FROM {SIMULATIONS_TABLE} AS s
+            JOIN {DETAILS_TABLE} AS d ON d.sim_uid = s.sim_uid
+            WHERE s.completed = 0
+              AND d.error IS NULL
+              AND d.finished_at IS NULL
+              AND d.braint_sim_id IS NOT NULL
+            ORDER BY s.simulated_at
+            """
         )
     )
 
@@ -602,36 +658,11 @@ def delete_simulations(connection: sqlite3.Connection, sim_uids: Sequence[str]) 
     for start in range(0, len(uids), 200):
         batch = uids[start : start + 200]
         removed += connection.execute(
-            f"DELETE FROM simulations WHERE sim_uid IN ({','.join('?' * len(batch))})", batch
+            f"DELETE FROM {SIMULATIONS_TABLE} WHERE sim_uid IN ({','.join('?' * len(batch))})",
+            batch,
         ).rowcount
     connection.commit()
     return removed
-
-
-def pending_placeholders(connection: sqlite3.Connection) -> list[sqlite3.Row]:
-    """Rows written at submit time whose final result was never stored.
-
-    This happens when the process is stopped while the platform is still computing:
-    the row keeps ``braint_sim_id`` but has no error, result or completion time.
-    """
-    return list(
-        connection.execute(
-            """
-            SELECT s.sim_uid,
-                   s.expression,
-                   s.settings_json,
-                   s.simulated_at,
-                   d.braint_sim_id
-            FROM simulations AS s
-            JOIN simulation_details AS d ON d.sim_uid = s.sim_uid
-            WHERE s.completed = 0
-              AND d.error IS NULL
-              AND d.finished_at IS NULL
-              AND d.braint_sim_id IS NOT NULL
-            ORDER BY s.simulated_at
-            """
-        )
-    )
 
 
 def _dump(value: Any) -> str | None:

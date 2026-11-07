@@ -151,11 +151,12 @@ uv run python -m worldquant_consultant_project.labeling --provider gemini
   token 用量、重试次数、状态（`ok` / `invalid` / `error`）与提示词 sha256
 - 视图 `v_<provider>_field_labels`：已打标签字段的扁平视图，便于下游取用
 
-## 因子回测（Fast Expression → simulations.db）
+## 因子回测（Fast Expression → alpha.db）
 
 子包：[`src/worldquant_consultant_project/simulation/`](./src/worldquant_consultant_project/simulation/)
 把 Fast Expression 因子提交到 BRAIN 模拟接口，轮询完成后取 `/alphas/{id}` 指标，
-写入独立数据库 `data/simulations.db`（与 `brain.db` 分开）。
+回测结果**按 `alpha_uid` 直接挂到 `data/alpha.db`**（与因子同库），一个因子可以有多条不同参数的
+回测记录。（原 `data/simulations.db` 已并入 `alpha.db` 并删除。）
 
 ### 作为函数调用
 
@@ -165,14 +166,27 @@ from worldquant_consultant_project.simulation import SimulationSettings, run_sim
 outcome = run_simulation(
     "rank(ts_delta(close, 5))",
     settings=SimulationSettings(decay=4, universe="TOP1000"),  # 省略则用默认参数
-    db_path="data/simulations.db",                              # 省略则用默认路径
+    db_path="data/alpha.db",                                    # 省略则用默认路径
 )
 outcome.status      # completed / failed
-outcome.alpha_id
+outcome.alpha_uid   # 结果挂在哪个因子上（未知表达式会自动登记进 alphas）
+outcome.alpha_id    # BRAIN 侧的 alpha id（库里列名 braint_alpha_id）
 outcome.metrics["is"]["sharpe"]
 ```
 
 无论成功、表达式错误还是超时，都会写入一条记录（失败记录带 `error`），不会抛未捕获异常。
+查某个因子的全部回测：
+
+```python
+from worldquant_consultant_project.simulation import storage
+
+conn = storage.connect("data/alpha.db")
+try:
+    for row in storage.runs_for_alpha(conn, "4219b06d86ad4a84bbf2eae9b746da38"):
+        print(row["simulated_at"], row["is_sharpe"], row["braint_alpha_id"])
+finally:
+    conn.close()
+```
 
 ### 命令行
 
@@ -201,13 +215,14 @@ uv run python -m worldquant_consultant_project.simulation.batch --limit 20  # �
 - **取数**：从 `data/alpha.db` 的 `alphas` 表读取 `simulated IS NULL` 的因子（按 `alpha_uid` 排序）
 - **并发**：线程池大小取自 [`maximum_concurrent_number`](./src/worldquant_consultant_project/simulation/maximum_concurrent_number)（当前 `3`，即账号允许的同时回测数），`--workers` 可临时覆盖
 - **参数**：取自 [`simulation_setting.json`](./src/worldquant_consultant_project/simulation/simulation_setting.json)（`type` + `settings`），每个线程独立登录并复用会话
-- **写回**：回测完成（无论成功或平台报错）后把 `alphas.simulated` 置 1、`simulated_at` 写入时间；本地崩溃（未真正提交）不标记，便于重试
-- **覆盖**：`simulations` 上建有 `(expression, settings_json)` 唯一索引，同一表达式 + 同一参数重跑会**覆盖原行并保留原 `sim_uid`**，不会新增重复记录
+- **写回**：回测完成（无论成功或因子报错）后把 `alphas.simulated` 置 1、`simulated_at` 写入时间；本地崩溃（未真正提交）与平台报错不标记，便于重试
+- **覆盖**：`alpha_simulations` 上建有 `(expression, settings_json)` 唯一索引，同一表达式 + 同一参数重跑会**覆盖原行并保留原 `sim_uid`**，不会新增重复记录；换个参数则是**新增一行**，同一个 `alpha_uid` 下可以有多条
 - **限流**：提交遇到 429（超出并发额度）会按 `Retry-After` 等待后重试，不会让该因子失败
 
 | 参数 | 说明 |
 |---|---|
-| `--alpha-db` / `--db` | 默认 `data/alpha.db` / `data/simulations.db` |
+| `--alpha-db` | 默认 `data/alpha.db`（因子与回测都在这里） |
+| `--db` | 已废弃的别名，等价于 `--alpha-db` |
 | `--settings` / `--concurrency-file` | 覆盖默认配置文件路径 |
 | `--workers N` | 覆盖并发数（默认读配置文件） |
 | `--limit N` | 只回测 N 个 |
@@ -239,7 +254,7 @@ uv run python -m worldquant_consultant_project.simulation.batch --limit 20  # �
 - **额度保护**：连续平台失败达到 `max(5, 2×workers)` 次，或收到每日额度错误时，批量立即停止，
   剩余因子保持待回测
 - **历史数据清理**：`--purge-platform-errors` 会删除 `error_kind='platform'` 的记录，并把
-  `alpha.db` 中对应表达式的 `simulated` 重置为 NULL（旧库在首次连接时会自动回填 `error_kind`）
+  对应 `alpha_uid` 的 `alphas.simulated` 重置为 NULL（旧记录在首次连接时会自动回填 `error_kind`）
 
 ### 平台侧停滞 / 超时的处理
 
@@ -262,40 +277,58 @@ uv run python -m worldquant_consultant_project.simulation.batch --limit 20  # �
 收尾成功的因子会在 `alpha.db` 里标记 `simulated=1`，避免重复提交；被判 interrupted 的因子保持
 未回测状态，可重新进入下一批。
 
-### 库表结构（`data/simulations.db`）
+### 库表结构（`data/alpha.db` 里的回测表）
 
-两张表（旧版宽表会在首次连接时自动丢弃重建）：
+两张表挂在外键 `alpha_uid` 上（`alphas` 删除时级联删除），一行回测 = 主表一行 + 详情表一行：
 
-**`simulations`** —— 一行一次回测
+**`alpha_simulations`** —— 一行一次回测
 
-| 列                                                                                                                                                                                     | 含义                                                                                                                                                    |
-| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `sim_uid`                                                                                                                                                                            | 回测 id（主键）                                                                                                                                         |
-| `expression`                                                                                                                                                                         | 因子表达式                                                                                                                                              |
-| `tentative_submittable`                                                                                                                                                              | 初判可提交（1/0）：其他检查全部 `PASS`，且 `SELF_CORRELATION` 为 `PASS` 或 `PENDING`（只有它为 `FAIL` 才算不通过）                            |
-| `settings_json`                                                                                                                                                                      | 回测设置整包 JSON（universe / delay / decay / neutralization / truncation … 不再拆列）                                                                 |
-| `completed`                                                                                                                                                                          | 是否跑完（1/0）                                                                                                                                         |
-| `simulated_at`                                                                                                                                                                       | 回测开始运行的时间（不是提交 alpha 的时间）                                                                                                             |
+| 列 | 含义 |
+|---|---|
+| `sim_uid` | 回测 id（主键） |
+| `alpha_uid` | 外键 → `alphas.alpha_uid`，这是「按因子查回测」的入口 |
+| `expression` | 因子表达式（冗余存一份，便于直接查看/去重） |
+| `tentative_submittable` | 初判可提交（1/0）：其他检查全部 `PASS`，且 `SELF_CORRELATION` 为 `PASS` 或 `PENDING`（只有它为 `FAIL` 才算不通过） |
+| `settings_json` | 回测设置整包 JSON（universe / delay / decay / neutralization / truncation … 不再拆列） |
+| `completed` | 是否跑完（1/0） |
+| `simulated_at` | 回测开始运行的时间（不是提交 alpha 的时间） |
+| `duration_seconds` | 回测耗时 |
+| `is_sharpe`、`is_fitness`、`is_returns`、`is_turnover`、`is_drawdown`、`is_margin`、`is_pnl`、`is_book_size`、`is_long_count`、`is_short_count`、`is_start_date` | 样本内（IS）全部指标，每项一列 |
+| `check_<检查名>` | 提交检查逐项一列，取值为 `PASS` / `FAIL` / `PENDING`（如 `check_low_sharpe`、`check_self_correlation`）；**首次遇到新检查项会自动加列** |
 
 同一 `(expression, settings_json)` 只保留一行：重跑会覆盖结果（保留原 `sim_uid`）。
-| `duration_seconds`                                                                                                                                                                   | 回测耗时                                                                                                                                                |
-| `is_sharpe`、`is_fitness`、`is_returns`、`is_turnover`、`is_drawdown`、`is_margin`、`is_pnl`、`is_book_size`、`is_long_count`、`is_short_count`、`is_start_date` | 样本内（IS）全部指标，每项一列                                                                                                                          |
-| `check_<检查名>`                                                                                                                                                                     | 提交检查逐项一列，取值为 `PASS` / `FAIL` / `PENDING`（如 `check_low_sharpe`、`check_self_correlation`）；**首次遇到新检查项会自动加列** |
 
-**`simulation_details`** —— 1:1 侧表，承载不宜进主表的信息
+**`alpha_simulation_details`** —— 1:1 侧表，承载不宜进主表的信息
 
-| 列                                           | 含义                                                       |
-| -------------------------------------------- | ---------------------------------------------------------- |
-| `sim_uid`                                  | 主键，外键指向 `simulations`                             |
-| `alpha_id` / `braint_sim_id`             | BRAIN 侧标识                                               |
-| `error`                                    | 失败原因（含表达式报错位置）                               |
-| `finished_at`                              | 完成时间                                                   |
-| `other_samples_json`                       | `os` / `train` / `test` / `prod` 样本指标 JSON     |
-| `is_extra_json`                            | IS 中未展开为列的额外字段兜底                              |
-| `checks_json`                              | 检查明细（含 `value`、`limit`、`year`、`message`） |
-| `raw_simulation_json` / `raw_alpha_json` | 原始响应，便于追溯                                         |
+| 列 | 含义 |
+|---|---|
+| `sim_uid` | 主键，外键指向 `alpha_simulations` |
+| `alpha_uid` | 冗余外键 → `alphas.alpha_uid` |
+| `braint_alpha_id` / `braint_sim_id` | BRAIN 侧标识（`alpha_id` 已改名为 `braint_alpha_id`，避免和 `alpha_uid` 混淆） |
+| `error` | 失败原因（含表达式报错位置） |
+| `error_kind` | `factor`（因子被评估后拒绝）/ `platform`（平台原因，因子未被评估） |
+| `finished_at` | 完成时间 |
+| `other_samples_json` | `os` / `train` / `test` / `prod` 样本指标 JSON |
+| `is_extra_json` | IS 中未展开为列的额外字段兜底 |
+| `checks_json` | 检查明细（含 `value`、`limit`、`year`、`message`） |
+| `raw_simulation_json` / `raw_alpha_json` | 原始响应，便于追溯 |
 
-视图 `v_simulation_summary`：表达式 + 完成状态 + IS 核心指标 + alpha_id。
+视图 `v_alpha_simulation_summary`：`sim_uid` + `alpha_uid` + 表达式 + 完成状态 + IS 核心指标 + `braint_alpha_id`。
+
+索引：`idx_alpha_simulations_alpha`（按因子查）、`idx_alpha_simulations_simulated`（按时间查）、
+`uq_alpha_simulations_expression_settings`（同参数覆盖）、`idx_alpha_simulation_details_braint`。
+
+一个因子可以有多次不同参数的回测：
+
+```sql
+SELECT expression FROM alphas WHERE alpha_uid = '4219b06d86ad4a84bbf2eae9b746da38';
+-- 该因子的全部回测，最新在前（含每项 check）
+SELECT s.simulated_at, s.settings_json, s.is_sharpe, s.check_self_correlation, d.braint_alpha_id
+FROM alpha_simulations AS s
+JOIN alpha_simulation_details AS d USING (sim_uid)
+WHERE s.alpha_uid = '4219b06d86ad4a84bbf2eae9b746da38'
+ORDER BY s.simulated_at DESC;
+```
 
 ### 关于「是否可提交」
 
@@ -312,8 +345,9 @@ BRAIN 的 `/alphas/{id}` 响应里**没有**「能否提交」字段，提交资
 需要更严格的完整判定（含自相关）时，直接查检查列：
 
 ```sql
-SELECT expression, alpha_id
-FROM simulations s JOIN simulation_details d ON d.sim_uid = s.sim_uid
+SELECT s.alpha_uid, s.expression, d.braint_alpha_id
+FROM alpha_simulations AS s
+JOIN alpha_simulation_details AS d USING (sim_uid)
 WHERE s.completed = 1
   AND s.check_low_sharpe = 'PASS'
   AND s.check_low_fitness = 'PASS'
@@ -366,13 +400,14 @@ uv run python -m worldquant_consultant_project.Template_based_alpha_generate
 
 实测组合数（含 `type` 筛选）：6 个模板共 **7,672** 条（T01 522 / T02 1,965 / T03 4,725 / T04 183 / T05 76 / T06 201）。
 
-### 库表结构（`data/alpha.db`）
+### 库表结构（`data/alpha.db` 里的因子表）
 
 | 表 / 视图               | 内容                                                                                                                                                                                                                        |
 | ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `alphas`              | **精简主表**，一行一个因子：`alpha_uid`（主键）、`expression`、`simulated`、`simulated_at` |
 | `alpha_details`       | 1:1 侧表：`template_id`、`template_name`、`expression_hash`（唯一，去重）、`slot_count`、`formula_pattern`、`label_source`、`slot_fill_json`、`run_id`、`generated_at` |
 | `alpha_slots`         | 每因子每槽位一行：`slot_name`、`slot_index`、`dataset_id`、`field_id`、`description`、`field_type`、`matched_providers`（命中规则的模型）、`labels_json`（各模型 5 维标签）                                 |
+| `alpha_simulations` + `alpha_simulation_details` | 回测记录，`alpha_uid` 外键挂回 `alphas`，一个因子可有多条（详见上文「库表结构（回测表）」） |
 | `v_alpha_expressions` | 表达式 + 模板 + 回测标记速查视图 |
 
 `simulated` / `simulated_at` 在生成时**保持 NULL**；等该因子被回测后再把 `simulated` 置 1
@@ -380,6 +415,22 @@ uv run python -m worldquant_consultant_project.Template_based_alpha_generate
 
 ```sql
 SELECT alpha_uid, expression FROM alphas WHERE simulated IS NULL;
+```
+
+只想回测模板生成、且还没跑过的因子时：
+
+```sql
+SELECT a.alpha_uid, a.expression
+FROM alphas AS a JOIN alpha_details AS d USING (alpha_uid)
+WHERE a.simulated IS NULL;
+```
+
+按因子查它的全部回测：
+
+```sql
+SELECT s.simulated_at, s.is_sharpe, d.braint_alpha_id
+FROM alpha_simulations AS s JOIN alpha_simulation_details AS d USING (sim_uid)
+WHERE s.alpha_uid = '...' ORDER BY s.simulated_at DESC;
 ```
 
 同一表达式重复生成会被 `alpha_details.expression_hash` 唯一索引拦下，重跑不产生重复行。
