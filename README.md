@@ -407,7 +407,7 @@ uv run python -m worldquant_consultant_project.Template_based_alpha_generate
 
 | 表 / 视图               | 内容                                                                                                                                                                                                                        |
 | ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `alphas`              | **精简主表**，一行一个因子：`alpha_uid`（主键）、`expression`、`simulated`、`simulated_at` |
+| `alphas`              | **精简主表**，一行一个因子：`alpha_uid`（主键）、`expression`、`simulated`、`simulated_at`，外加三列由回测汇总出来的指标：`tentative_submittable`（任一回测可提交即 1，否则 0）、`max_is_sharpe`、`max_is_fitness`（各自取所有回测的最大值，两者可能来自不同回测） |
 | `alpha_details`       | 1:1 侧表：`template_id`、`template_name`、`expression_hash`（唯一，去重）、`slot_count`、`formula_pattern`、`label_source`、`slot_fill_json`、`run_id`、`generated_at` |
 | `alpha_slots`         | 每因子每槽位一行：`slot_name`、`slot_index`、`dataset_id`、`field_id`、`description`、`field_type`、`matched_providers`（命中规则的模型）、`labels_json`（各模型 5 维标签）                                 |
 | `alpha_simulations` + `alpha_simulation_details` | 回测记录，`alpha_uid` 外键挂回 `alphas`，一个因子可有多条（详见上文「库表结构（回测表）」） |
@@ -434,6 +434,25 @@ WHERE a.simulated IS NULL;
 SELECT s.simulated_at, s.is_sharpe, d.braint_alpha_id
 FROM alpha_simulations AS s JOIN alpha_simulation_details AS d USING (sim_uid)
 WHERE s.alpha_uid = '...' ORDER BY s.simulated_at DESC;
+```
+
+### 因子级汇总列（`alphas` 上）
+
+每次往库里写回测（含覆盖、删除），都会用 `refresh_alpha_metrics()` 重算这几列：
+
+| 列 | 规则 |
+|---|---|
+| `tentative_submittable` | 该因子**任一**回测的 `tentative_submittable = 1` 就记 1，否则 0（没有任何回测也是 0） |
+| `max_is_sharpe` | 该因子所有回测 `is_sharpe` 的最大值（无值为 NULL） |
+| `max_is_fitness` | 该因子所有回测 `is_fitness` 的最大值（无值为 NULL） |
+
+两个最大值**可以来自不同的回测**，不要求出现在同一行。直接筛「值得提交」的因子：
+
+```sql
+SELECT alpha_uid, expression, max_is_sharpe, max_is_fitness
+FROM alphas
+WHERE tentative_submittable = 1
+ORDER BY max_is_sharpe DESC;
 ```
 
 同一表达式重复生成会被 `alpha_details.expression_hash` 唯一索引拦下，重跑不产生重复行。

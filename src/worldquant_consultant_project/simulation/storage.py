@@ -53,6 +53,13 @@ TENTATIVE_RULE_VERSION = "2"
 SIMULATIONS_TABLE = "alpha_simulations"
 DETAILS_TABLE = "alpha_simulation_details"
 
+#: Columns on ``alphas`` summarising every run of that factor (refreshed on each write).
+ALPHA_AGGREGATE_COLUMNS: tuple[tuple[str, str], ...] = (
+    ("tentative_submittable", "INTEGER"),
+    ("max_is_sharpe", "REAL"),
+    ("max_is_fitness", "REAL"),
+)
+
 MAIN_COLUMNS: tuple[str, ...] = (
     "sim_uid",
     "alpha_uid",
@@ -88,8 +95,24 @@ CREATE TABLE IF NOT EXISTS alphas (
     alpha_uid    TEXT PRIMARY KEY,
     expression   TEXT NOT NULL,
     simulated    INTEGER,
-    simulated_at TEXT
+    simulated_at TEXT,
+    tentative_submittable INTEGER,
+    max_is_sharpe REAL,
+    max_is_fitness REAL
 );
+"""
+
+#: ``UPDATE alphas SET ?`` body that recomputes the aggregate columns of a factor.
+_ALPHA_AGGREGATE_SET = f"""
+    tentative_submittable = COALESCE((
+        SELECT MAX(s.tentative_submittable) FROM {SIMULATIONS_TABLE} AS s
+        WHERE s.alpha_uid = alphas.alpha_uid), 0),
+    max_is_sharpe = (
+        SELECT MAX(s.is_sharpe) FROM {SIMULATIONS_TABLE} AS s
+        WHERE s.alpha_uid = alphas.alpha_uid),
+    max_is_fitness = (
+        SELECT MAX(s.is_fitness) FROM {SIMULATIONS_TABLE} AS s
+        WHERE s.alpha_uid = alphas.alpha_uid)
 """
 
 _SIMULATIONS_TABLE = """
@@ -238,8 +261,10 @@ def connect(path: Path | str | None = None, *, initialize: bool = True) -> sqlit
 
     connection.executescript(_schema())
     _ensure_error_kind(connection)
-    _refresh_tentative(connection)
-    connection.commit()
+    _ensure_alpha_aggregates(connection)
+    if _refresh_tentative(connection):
+        refresh_all_alpha_metrics(connection)
+        connection.commit()
     return connection
 
 
@@ -287,6 +312,49 @@ def _refresh_tentative(connection: sqlite3.Connection) -> int:
     )
     connection.commit()
     return updated
+
+
+def _ensure_alpha_aggregates(connection: sqlite3.Connection) -> int:
+    """Add the aggregate columns on ``alphas`` and backfill them from existing runs."""
+    columns = {row["name"] for row in connection.execute("PRAGMA table_info(alphas)")}
+    missing = [(name, kind) for name, kind in ALPHA_AGGREGATE_COLUMNS if name not in columns]
+    if not missing:
+        return 0
+    for name, kind in missing:
+        connection.execute(f"ALTER TABLE alphas ADD COLUMN {name} {kind}")
+    refresh_all_alpha_metrics(connection)
+    connection.commit()
+    return len(missing)
+
+
+def refresh_alpha_metrics(
+    connection: sqlite3.Connection, alpha_uids: Iterable[str] | str
+) -> int:
+    """Recompute the aggregate columns of the given factors from their runs.
+
+    ``tentative_submittable`` is 1 as soon as one run allows submission, ``max_is_sharpe``
+    and ``max_is_fitness`` are the best in-sample values over all runs (they may come from
+    different runs).
+    """
+    uids = [alpha_uids] if isinstance(alpha_uids, str) else list(alpha_uids)
+    uids = [uid for uid in dict.fromkeys(uids) if uid]
+    if not uids:
+        return 0
+    updated = 0
+    for start in range(0, len(uids), 200):
+        batch = uids[start : start + 200]
+        updated += connection.execute(
+            f"UPDATE alphas SET {_ALPHA_AGGREGATE_SET} "
+            f"WHERE alpha_uid IN ({','.join('?' * len(batch))})",
+            batch,
+        ).rowcount
+    connection.commit()
+    return updated
+
+
+def refresh_all_alpha_metrics(connection: sqlite3.Connection) -> int:
+    """Recompute the aggregate columns of every factor."""
+    return connection.execute(f"UPDATE alphas SET {_ALPHA_AGGREGATE_SET}").rowcount
 
 
 def ensure_alpha(connection: sqlite3.Connection, expression: str) -> tuple[str, bool]:
@@ -574,6 +642,7 @@ def write_outcome(connection: sqlite3.Connection, **kwargs: Any) -> None:
         f"VALUES ({detail_placeholders}) ON CONFLICT (sim_uid) DO UPDATE SET {detail_updates}",
         details,
     )
+    refresh_alpha_metrics(connection, main["alpha_uid"])
     connection.commit()
 
 
@@ -662,13 +731,24 @@ def delete_simulations(connection: sqlite3.Connection, sim_uids: Sequence[str]) 
     uids = list(sim_uids)
     if not uids:
         return 0
+    affected: list[str] = []
     removed = 0
     for start in range(0, len(uids), 200):
         batch = uids[start : start + 200]
+        placeholders = ",".join("?" * len(batch))
+        affected += [
+            row["alpha_uid"]
+            for row in connection.execute(
+                f"SELECT DISTINCT alpha_uid FROM {SIMULATIONS_TABLE} "
+                f"WHERE sim_uid IN ({placeholders})",
+                batch,
+            )
+        ]
         removed += connection.execute(
-            f"DELETE FROM {SIMULATIONS_TABLE} WHERE sim_uid IN ({','.join('?' * len(batch))})",
+            f"DELETE FROM {SIMULATIONS_TABLE} WHERE sim_uid IN ({placeholders})",
             batch,
         ).rowcount
+    refresh_alpha_metrics(connection, affected)
     connection.commit()
     return removed
 
