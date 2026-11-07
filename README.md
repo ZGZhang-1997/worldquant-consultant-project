@@ -296,7 +296,9 @@ uv run python -m worldquant_consultant_project.simulation.batch --limit 20  # �
 | `is_sharpe`、`is_fitness`、`is_returns`、`is_turnover`、`is_drawdown`、`is_margin`、`is_pnl`、`is_book_size`、`is_long_count`、`is_short_count`、`is_start_date` | 样本内（IS）全部指标，每项一列 |
 | `check_<检查名>` | 提交检查逐项一列，取值为 `PASS` / `FAIL` / `PENDING`（如 `check_low_sharpe`、`check_self_correlation`）；**首次遇到新检查项会自动加列** |
 
-同一 `(expression, settings_json)` 只保留一行：重跑会覆盖结果（保留原 `sim_uid`）。
+同一 `(expression, settings_json)` 只保留一行：重跑会覆盖结果（保留原 `sim_uid`），且是**整行替换**——
+新结果里没有的 `is_*` / `check_*` 会被清空，不会残留上一次的判定。换个参数则是新增一行，
+同一 `alpha_uid` 下可以有多条。
 
 **`alpha_simulation_details`** —— 1:1 侧表，承载不宜进主表的信息
 

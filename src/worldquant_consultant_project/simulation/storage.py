@@ -549,6 +549,14 @@ def write_outcome(connection: sqlite3.Connection, **kwargs: Any) -> None:
     new_checks = [column for column in main if column.startswith(CHECK_COLUMN_PREFIX)]
     ensure_check_columns(connection, [column[len(CHECK_COLUMN_PREFIX):] for column in new_checks])
 
+    # An overwrite replaces the whole result, so checks the new run no longer reports must
+    # be cleared instead of keeping the previous verdict (e.g. a re-run that failed).
+    stale_checks = [
+        column for column in known_check_columns(connection) if column not in main
+    ]
+    if stale_checks:
+        main.update(dict.fromkeys(stale_checks))
+
     main_columns = list(main)
     placeholders = ", ".join(f":{name}" for name in main_columns)
     updates = ", ".join(f"{name} = excluded.{name}" for name in main_columns if name != "sim_uid")
