@@ -407,7 +407,7 @@ uv run python -m worldquant_consultant_project.Template_based_alpha_generate
 
 | 表 / 视图               | 内容                                                                                                                                                                                                                        |
 | ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `alphas`              | **精简主表**，一行一个因子：`alpha_uid`（主键）、`expression`、`simulated`、`simulated_at`，外加三列由回测汇总出来的指标：`tentative_submittable`（任一回测可提交即 1，否则 0）、`max_is_sharpe`、`max_is_fitness`（各自取所有回测的最大值，两者可能来自不同回测） |
+| `alphas`              | **精简主表**，一行一个因子：`alpha_uid`（主键）、`expression`、`simulated`、`simulated_at`，外加由回测汇总出来的指标列：`tentative_submittable`（任一回测可提交即 1，否则 0）、`max_is_sharpe`、`max_is_fitness`（所有回测的最大值），以及按 delay 分组的 `max_is_sharpe_delay1` / `max_is_fitness_delay1` / `max_is_sharpe_delay0` / `max_is_fitness_delay0` |
 | `alpha_details`       | 1:1 侧表：`template_id`、`template_name`、`expression_hash`（唯一，去重）、`slot_count`、`formula_pattern`、`label_source`、`slot_fill_json`、`run_id`、`generated_at` |
 | `alpha_slots`         | 每因子每槽位一行：`slot_name`、`slot_index`、`dataset_id`、`field_id`、`description`、`field_type`、`matched_providers`（命中规则的模型）、`labels_json`（各模型 5 维标签）                                 |
 | `alpha_simulations` + `alpha_simulation_details` | 回测记录，`alpha_uid` 外键挂回 `alphas`，一个因子可有多条（详见上文「库表结构（回测表）」） |
@@ -445,14 +445,21 @@ WHERE s.alpha_uid = '...' ORDER BY s.simulated_at DESC;
 | `tentative_submittable` | 该因子**任一**回测的 `tentative_submittable = 1` 就记 1，否则 0（没有任何回测也是 0） |
 | `max_is_sharpe` | 该因子所有回测 `is_sharpe` 的最大值（无值为 NULL） |
 | `max_is_fitness` | 该因子所有回测 `is_fitness` 的最大值（无值为 NULL） |
+| `max_is_sharpe_delay1` / `max_is_fitness_delay1` | 同上，但只在 `delay = 1` 的回测里取最大 |
+| `max_is_sharpe_delay0` / `max_is_fitness_delay0` | 同上，但只在 `delay = 0` 的回测里取最大 |
 
-两个最大值**可以来自不同的回测**，不要求出现在同一行。直接筛「值得提交」的因子：
+- delay 取自每条回测 `settings_json` 里的 `delay`（JSON 损坏或缺失时该条不参与分组统计）
+- 各最大值**可以来自不同的回测**，不要求出现在同一行；某个 delay 没有回测时，对应两列为 NULL
+- 一个因子只要有一条可提交的回测，`tentative_submittable` 就是 1，与 delay 无关
+
+直接筛「值得提交」的因子：
 
 ```sql
-SELECT alpha_uid, expression, max_is_sharpe, max_is_fitness
+SELECT alpha_uid, expression, max_is_sharpe, max_is_fitness,
+       max_is_sharpe_delay1, max_is_fitness_delay1
 FROM alphas
 WHERE tentative_submittable = 1
-ORDER BY max_is_sharpe DESC;
+ORDER BY max_is_sharpe_delay1 DESC;
 ```
 
 同一表达式重复生成会被 `alpha_details.expression_hash` 唯一索引拦下，重跑不产生重复行。

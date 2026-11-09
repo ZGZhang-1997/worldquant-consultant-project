@@ -53,11 +53,26 @@ TENTATIVE_RULE_VERSION = "2"
 SIMULATIONS_TABLE = "alpha_simulations"
 DETAILS_TABLE = "alpha_simulation_details"
 
-#: Columns on ``alphas`` summarising every run of that factor (refreshed on each write).
+#: Aggregate columns on ``alphas``. They summarise every run of a factor and are
+#: recomputed whenever the factor's runs change.
 ALPHA_AGGREGATE_COLUMNS: tuple[tuple[str, str], ...] = (
     ("tentative_submittable", "INTEGER"),
     ("max_is_sharpe", "REAL"),
     ("max_is_fitness", "REAL"),
+    ("max_is_sharpe_delay1", "REAL"),
+    ("max_is_fitness_delay1", "REAL"),
+    ("max_is_sharpe_delay0", "REAL"),
+    ("max_is_fitness_delay0", "REAL"),
+)
+
+#: Delays with their own max-metric columns.
+AGGREGATE_DELAYS: tuple[int, ...] = (1, 0)
+
+#: ``delay`` of a run, taken from ``settings_json``; NULL when the JSON has no delay.
+_DELAY_SQL = (
+    "CAST(json_extract("
+    "CASE WHEN json_valid(s.settings_json) THEN s.settings_json ELSE '{}' END,"
+    " '$.delay') AS INTEGER)"
 )
 
 MAIN_COLUMNS: tuple[str, ...] = (
@@ -98,22 +113,46 @@ CREATE TABLE IF NOT EXISTS alphas (
     simulated_at TEXT,
     tentative_submittable INTEGER,
     max_is_sharpe REAL,
-    max_is_fitness REAL
+    max_is_fitness REAL,
+    max_is_sharpe_delay1 REAL,
+    max_is_fitness_delay1 REAL,
+    max_is_sharpe_delay0 REAL,
+    max_is_fitness_delay0 REAL
 );
 """
 
-#: ``UPDATE alphas SET ?`` body that recomputes the aggregate columns of a factor.
-_ALPHA_AGGREGATE_SET = f"""
-    tentative_submittable = COALESCE((
+
+def _max_metric_sql(column: str, metric: str | None = None, delay: int | None = None) -> str:
+    """``MAX(<metric>)`` over the runs of the factor, optionally only for one ``delay``."""
+    name = metric or column.removeprefix("max_")
+    for suffix in (*(f"_delay{d}" for d in AGGREGATE_DELAYS),):
+        name = name.removesuffix(suffix)
+    where = ["s.alpha_uid = alphas.alpha_uid"]
+    if delay is not None:
+        where.append(f"{_DELAY_SQL} = {delay}")
+    return (
+        f"(SELECT MAX(s.{name}) FROM {SIMULATIONS_TABLE} AS s "
+        f"WHERE {' AND '.join(where)})"
+    )
+
+
+_ALPHA_AGGREGATE_PARTS: list[str] = [
+    f"""tentative_submittable = COALESCE((
         SELECT MAX(s.tentative_submittable) FROM {SIMULATIONS_TABLE} AS s
-        WHERE s.alpha_uid = alphas.alpha_uid), 0),
-    max_is_sharpe = (
-        SELECT MAX(s.is_sharpe) FROM {SIMULATIONS_TABLE} AS s
-        WHERE s.alpha_uid = alphas.alpha_uid),
-    max_is_fitness = (
-        SELECT MAX(s.is_fitness) FROM {SIMULATIONS_TABLE} AS s
-        WHERE s.alpha_uid = alphas.alpha_uid)
-"""
+        WHERE s.alpha_uid = alphas.alpha_uid), 0)""",
+    f"max_is_sharpe = {_max_metric_sql('max_is_sharpe')}",
+    f"max_is_fitness = {_max_metric_sql('max_is_fitness')}",
+]
+for _delay in AGGREGATE_DELAYS:
+    for _metric in ("sharpe", "fitness"):
+        _column = f"max_is_{_metric}_delay{_delay}"
+        _ALPHA_AGGREGATE_PARTS.append(
+            f"{_column} = {_max_metric_sql(_column, f'is_{_metric}', _delay)}"
+        )
+
+#: ``UPDATE alphas SET ?`` body that recomputes the aggregate columns of a factor.
+_ALPHA_AGGREGATE_SET = "\n    " + ",\n    ".join(_ALPHA_AGGREGATE_PARTS) + "\n"
+del _delay, _metric, _column
 
 _SIMULATIONS_TABLE = """
 CREATE TABLE IF NOT EXISTS {table} (
