@@ -86,10 +86,17 @@ def parse_delay(value: str | int) -> int:
     try:
         delay = int(text)
     except ValueError as exc:
-        raise ValueError(f"delay must be delay0 or delay1, got {value!r}") from exc
+        raise ValueError(f"delay must be delay0, delay1 or both, got {value!r}") from exc
     if delay not in SUPPORTED_DELAYS:
         raise ValueError(f"delay must be 0 or 1, got {delay}")
     return delay
+
+
+def parse_delays(value: str | int) -> list[int]:
+    """``both`` sweeps delay1 then delay0; anything else is a single delay."""
+    if str(value).strip().lower() in ("both", "all"):
+        return [1, 0]
+    return [parse_delay(value)]
 
 
 def _first_number(value: Any, *, field_name: str) -> float:
@@ -220,13 +227,16 @@ def select_alphas(
 
 
 def existing_pairs(alpha_db: Path | str) -> set[tuple[str, str]]:
-    """Every ``(expression, settings_json)`` that already has a stored run."""
+    """``(expression, settings_json)`` pairs that already produced a verdict."""
     connection = sqlite3.connect(str(alpha_db), timeout=60.0)
     try:
         return {
             (row[0], row[1])
             for row in connection.execute(
-                f"SELECT expression, settings_json FROM {storage.SIMULATIONS_TABLE}"
+                f"SELECT s.expression, s.settings_json FROM {storage.SIMULATIONS_TABLE} AS s "
+                f"JOIN {storage.DETAILS_TABLE} AS d ON d.sim_uid = s.sim_uid "
+                "WHERE s.completed = 1 OR d.error_kind = ?",
+                (storage.ERROR_KIND_FACTOR,),
             )
         }
     finally:
@@ -285,7 +295,7 @@ def run_optimization(
         """``("skipped", None)`` when the pair is already stored, else (bucket, error)."""
         connection = storage.connect(alpha_db, initialize=False)
         try:
-            if storage.find_sim_uid(
+            if storage.has_decided_run(
                 connection, alpha.expression, storage.settings_json(settings.stored)
             ):
                 return "skipped", None
@@ -409,7 +419,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--delay",
         default="delay1",
-        help="delay group to optimise: delay1 (default) or delay0",
+        help="delay group to optimise: delay1 (default), delay0, or both",
     )
     parser.add_argument(
         "--alpha-db", type=Path, default=DEFAULT_ALPHA_DB, help="factor database"
@@ -447,6 +457,65 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+@dataclass
+class SweepPlan:
+    """What one delay group will do: which factors, over which parameter grid."""
+
+    delay: int
+    sharpe_min: float
+    fitness_min: float
+    alphas: list[OptimizeAlpha]
+    grid: list[SimulationSettings]
+    to_do: int
+    already: int
+
+
+def build_plans(args: argparse.Namespace, delays: Sequence[int]) -> list[SweepPlan]:
+    plans: list[SweepPlan] = []
+    for delay in delays:
+        sharpe_min, fitness_min = load_thresholds(args.selection, delay=delay)
+        grid = load_search_space(args.search_space, delay=delay)
+        alphas = select_alphas(
+            args.alpha_db,
+            delay=delay,
+            sharpe_min=sharpe_min,
+            fitness_min=fitness_min,
+            limit=args.limit,
+        )
+        to_do, already = plan_runs(alphas, grid, alpha_db=args.alpha_db)
+        plans.append(
+            SweepPlan(delay, sharpe_min, fitness_min, alphas, grid, to_do, already)
+        )
+        logger.info(
+            "delay%d | sharpe>=%g fitness>=%g | factors=%d | combinations=%d | "
+            "runs=%d (already decided=%d)",
+            delay,
+            sharpe_min,
+            fitness_min,
+            len(alphas),
+            len(grid),
+            to_do,
+            already,
+        )
+    return plans
+
+
+def _summarise(plan: SweepPlan, stats: OptimizeStats) -> None:
+    print(
+        f"delay{plan.delay}: {len(plan.alphas)} factor(s) x {len(plan.grid)} combination(s) "
+        f"in {stats.duration_seconds:.0f}s (ok={stats.ok}, failed={stats.failed}, "
+        f"platform_failed={stats.platform_failed}, pending={stats.pending}, "
+        f"skipped={stats.skipped})"
+    )
+    if stats.abort_reason:
+        print(f"  sweep stopped early: {stats.abort_reason}")
+        print("  the remaining pairs can be resumed later; decided runs are skipped")
+    for alpha_uid, reason in stats.failures[:10]:
+        print(f"  failed {alpha_uid}: {reason[:120]}")
+    if len(stats.failures) > 10:
+        print(f"  ... and {len(stats.failures) - 10} more failures")
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     log_path = setup_logging(args.log_level, args.log_dir)
@@ -454,10 +523,8 @@ def main(argv: list[str] | None = None) -> int:
         logger.info("logging to %s", log_path)
 
     try:
-        delay = parse_delay(args.delay)
-        sharpe_min, fitness_min = load_thresholds(args.selection, delay=delay)
-        grid = load_search_space(args.search_space, delay=delay)
-    except (ValueError, SettingsFileError) as exc:
+        delays = parse_delays(args.delay)
+    except ValueError as exc:
         logger.error("%s", exc)
         return EXIT_CONFIG
 
@@ -471,78 +538,78 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT_CONFIG
 
     try:
-        alphas = select_alphas(
-            args.alpha_db,
-            delay=delay,
-            sharpe_min=sharpe_min,
-            fitness_min=fitness_min,
-            limit=args.limit,
-        )
-    except FileNotFoundError as exc:
+        plans = build_plans(args, delays)
+    except (SettingsFileError, FileNotFoundError) as exc:
         logger.error("%s", exc)
         return EXIT_CONFIG
+    logger.info("workers=%d | db=%s", workers, args.alpha_db)
 
-    if not alphas:
-        print(
-            f"no factor clears delay{delay} thresholds "
-            f"(max_is_sharpe_delay{delay} >= {sharpe_min:g} and "
-            f"max_is_fitness_delay{delay} >= {fitness_min:g})"
-        )
-        return EXIT_OK
-
-    to_do, already = plan_runs(alphas, grid, alpha_db=args.alpha_db)
-    logger.info(
-        "delay%d | sharpe>=%g fitness>=%g | factors=%d | combinations=%d | runs=%d (already stored=%d) "
-        "| workers=%d | db=%s",
-        delay,
-        sharpe_min,
-        fitness_min,
-        len(alphas),
-        len(grid),
-        to_do,
-        already,
-        workers,
-        args.alpha_db,
-    )
+    for plan in plans:
+        if not plan.alphas:
+            print(
+                f"delay{plan.delay}: no factor clears the thresholds "
+                f"(max_is_sharpe_delay{plan.delay} >= {plan.sharpe_min:g} and "
+                f"max_is_fitness_delay{plan.delay} >= {plan.fitness_min:g})"
+            )
 
     if args.dry_run:
-        print(f"delay{delay}: {len(alphas)} factor(s), {len(grid)} combination(s)")
-        print(f"runs to do: {to_do} (already stored: {already})")
-        for alpha in alphas[:5]:
-            print(f"  {alpha.alpha_uid}  {alpha.expression}")
-        if len(alphas) > 5:
-            print(f"  ... and {len(alphas) - 5} more")
+        for plan in plans:
+            if not plan.alphas:
+                continue
+            print(
+                f"delay{plan.delay}: {len(plan.alphas)} factor(s), "
+                f"{len(plan.grid)} combination(s)"
+            )
+            print(f"  runs to do: {plan.to_do} (already decided: {plan.already})")
+            for alpha in plan.alphas[:5]:
+                print(f"  {alpha.alpha_uid}  {alpha.expression}")
+            if len(plan.alphas) > 5:
+                print(f"  ... and {len(plan.alphas) - 5} more")
+        if not any(plan.alphas for plan in plans):
+            return EXIT_OK
         return EXIT_OK
 
-    try:
-        stats = run_optimization(
-            alphas,
-            grid,
-            alpha_db=args.alpha_db,
-            workers=workers,
-            timeout=args.timeout,
-            credentials_path=args.credentials,
-            progress_every=args.progress_every,
+    totals = OptimizeStats()
+    exit_code = EXIT_OK
+    for plan in plans:
+        if not plan.alphas:
+            continue
+        try:
+            stats = run_optimization(
+                plan.alphas,
+                plan.grid,
+                alpha_db=args.alpha_db,
+                workers=workers,
+                timeout=args.timeout,
+                credentials_path=args.credentials,
+                progress_every=args.progress_every,
+            )
+        except (CredentialsError, BrainSimulationError) as exc:
+            logger.error("delay%d: %s", plan.delay, exc)
+            return EXIT_CONFIG
+
+        _summarise(plan, stats)
+        totals.ok += stats.ok
+        totals.failed += stats.failed
+        totals.platform_failed += stats.platform_failed
+        totals.pending += stats.pending
+        totals.skipped += stats.skipped
+        totals.planned += stats.planned
+        totals.duration_seconds += stats.duration_seconds
+        if stats.failed:
+            exit_code = EXIT_PARTIAL
+        if stats.abort_reason:
+            # The account is the problem (quota, session, outage): do not start the next group.
+            exit_code = EXIT_PARTIAL
+            break
+
+    if len(delays) > 1:
+        print(
+            f"total: ok={totals.ok}, failed={totals.failed}, "
+            f"platform_failed={totals.platform_failed}, pending={totals.pending}, "
+            f"skipped={totals.skipped} in {totals.duration_seconds:.0f}s"
         )
-    except (CredentialsError, BrainSimulationError) as exc:
-        logger.error("%s", exc)
-        return EXIT_CONFIG
-
-    print(
-        f"optimised {len(alphas)} factor(s) over {len(grid)} combination(s) in "
-        f"{stats.duration_seconds:.0f}s (ok={stats.ok}, failed={stats.failed}, "
-        f"platform_failed={stats.platform_failed}, pending={stats.pending}, "
-        f"skipped={stats.skipped})"
-    )
-    if stats.abort_reason:
-        print(f"sweep stopped early: {stats.abort_reason}")
-        print("  the remaining pairs can be resumed later; stored runs are skipped")
-    for alpha_uid, reason in stats.failures[:10]:
-        print(f"  failed {alpha_uid}: {reason[:120]}")
-    if len(stats.failures) > 10:
-        print(f"  ... and {len(stats.failures) - 10} more failures")
-
-    return EXIT_OK if stats.failed == 0 else EXIT_PARTIAL
+    return exit_code
 
 
 if __name__ == "__main__":  # pragma: no cover

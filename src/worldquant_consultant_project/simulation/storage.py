@@ -769,6 +769,24 @@ def find_sim_uid(
     return str(row[0]) if row else None
 
 
+def has_decided_run(
+    connection: sqlite3.Connection, expression: str, settings_text: str
+) -> bool:
+    """Whether this expression already has a *result* for these settings.
+
+    A placeholder left by a run that never came back, or a deleted-then-retried platform
+    failure, does not count: such a pair is worth submitting again.
+    """
+    row = connection.execute(
+        f"SELECT 1 FROM {SIMULATIONS_TABLE} AS s "
+        f"JOIN {DETAILS_TABLE} AS d ON d.sim_uid = s.sim_uid "
+        "WHERE s.expression = ? AND s.settings_json = ? "
+        "AND (s.completed = 1 OR d.error_kind = ?) LIMIT 1",
+        (expression, settings_text, ERROR_KIND_FACTOR),
+    ).fetchone()
+    return row is not None
+
+
 def write_outcome(connection: sqlite3.Connection, **kwargs: Any) -> None:
     """Insert or update one backtest (row + side row), adding check columns as needed.
 

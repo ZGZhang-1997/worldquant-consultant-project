@@ -246,6 +246,8 @@ uv run python -m worldquant_consultant_project.simulation.optimize --delay delay
 uv run python -m worldquant_consultant_project.simulation.optimize
 # 换成 delay=0 的那一组阈值
 uv run python -m worldquant_consultant_project.simulation.optimize --delay delay0
+# 两组连着跑（先 delay1 再 delay0）
+uv run python -m worldquant_consultant_project.simulation.optimize --delay both
 ```
 
 两步：
@@ -253,22 +255,25 @@ uv run python -m worldquant_consultant_project.simulation.optimize --delay delay
 1. **挑选因子**：`--delay` 决定用哪一组阈值，从
    [`settings_for_choosing_alphas_to_optimize.json`](./src/worldquant_consultant_project/simulation/settings_for_choosing_alphas_to_optimize.json)
    读 `delay1` / `delay0` 的 `is_sharpe_lower_limit` 与 `is_fitness_lower_limit`，
-   要求 `alphas.max_is_sharpe_delay{1,0}` 与 `max_is_fitness_delay{1,0}` **同时**大于等于阈值
+   要求 `alphas.max_is_sharpe_delay{1,0}` 与 `max_is_fitness_delay{1,0}` **同时**大于等于阈值；
+   `--delay both` 会把两组阈值各跑一遍，日志与汇总按 delay 分组输出
 2. **参数扫描**：把
    [`optimization_simulation_settings.json`](./src/worldquant_consultant_project/simulation/optimization_simulation_settings.json)
    的 `search_space` 各轴做**笛卡尔积**，逐组参数回测这些因子；`delay` 一律用启动参数，
    文件里若写了 `delay` 会被忽略（并打一条 warning）
 
-- **跳过已跑过的组合**：每组回测提交前都会按 `(expression, settings_json)` 查一次库，已有记录就直接
-  跳过，因此中途停掉再跑一次会自动续上，不会重复烧额度
+- **跳过已有判定的组合**：每组回测提交前按 `(expression, settings_json)` 查库，**已有结果或已有
+  「因子原因」报错**的记录才跳过；只有一条待定占位行（轮询超时、还没有结果）的组合会重新提交。
+  中途停掉再跑一次会自动续上，不会重复烧额度
 - **写回**：与批量回测共用同一条落库路径，`alphas` 上的 `number_of_simulations`、`max_*`、
   `tentative_submittable` 会随扫描结果一起更新（新参数的回测成为该因子的新记录）
 - **并发**：线程池大小同样取自 `maximum_concurrent_number`（`--workers` 可覆盖）
-- **额度保护**：连续平台失败达到 `max(5, 2×workers)` 次会中止整轮，剩余组合保持未跑，下次续跑
+- **额度保护**：连续平台失败达到 `max(5, 2×workers)` 次会中止整轮，剩余组合保持未跑，下次续跑；
+  `--delay both` 时一组被中止就不再开始下一组
 
 | 参数 | 说明 |
 |---|---|
-| `--delay` | `delay1`（默认）/ `delay0`，也接受 `1` / `0` |
+| `--delay` | `delay1`（默认）/ `delay0` / `both`（先 delay1 后 delay0），也接受 `1` / `0` |
 | `--selection` | 选因子的阈值文件，默认 `settings_for_choosing_alphas_to_optimize.json` |
 | `--search-space` | 参数网格文件，默认 `optimization_simulation_settings.json` |
 | `--alpha-db` / `--concurrency-file` | 与批量回测相同 |
