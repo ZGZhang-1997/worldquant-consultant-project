@@ -24,6 +24,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 
+from ..acquisition.active_alphas import sync_active_alphas
 from ..acquisition.config import CredentialsError, load_credentials
 from . import storage
 from .batch import ClientPool, outcome_bucket
@@ -452,6 +453,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="report the selected factors and the runs still to do, then exit",
     )
+    parser.add_argument(
+        "--skip-active-sync",
+        action="store_true",
+        help="do not mirror the platform's submitted (ACTIVE) alphas before starting",
+    )
     parser.add_argument("--log-dir", type=Path, default=DEFAULT_LOG_DIR)
     parser.add_argument("--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR"])
     return parser
@@ -527,6 +533,22 @@ def main(argv: list[str] | None = None) -> int:
     except ValueError as exc:
         logger.error("%s", exc)
         return EXIT_CONFIG
+
+    if not args.skip_active_sync:
+        try:
+            synced = sync_active_alphas(
+                alpha_db=args.alpha_db, credentials_path=args.credentials
+            )
+        except Exception as exc:  # noqa: BLE001 - the sweep must still run without the mirror
+            logger.warning("cannot sync the active alphas (%s); continuing without them", exc)
+        else:
+            if synced.fetched:
+                logger.info(
+                    "active alphas: fetched=%d, new factors=%d, rows=%d",
+                    synced.fetched,
+                    synced.created_alphas,
+                    synced.total_rows,
+                )
 
     try:
         workers = args.workers or load_max_concurrency(args.concurrency_file)

@@ -54,6 +54,7 @@ TENTATIVE_RULE_VERSION = "2"
 
 SIMULATIONS_TABLE = "alpha_simulations"
 DETAILS_TABLE = "alpha_simulation_details"
+ACTIVE_ALPHAS_TABLE = "active_alphas"
 
 #: Columns ``alphas`` gains on top of ``alpha_uid``/``expression``, in table order.
 #: They summarise the factor's runs and are recomputed whenever those runs change.
@@ -139,6 +140,54 @@ def alphas_table_sql(table: str = "alphas") -> str:
     return f"CREATE TABLE IF NOT EXISTS {table} (\n    {body}\n);\n"
 
 
+#: Columns of ``active_alphas`` beyond the in-sample metrics, in table order.
+ACTIVE_ALPHA_COLUMNS: tuple[str, ...] = (
+    "braint_alpha_id",
+    "alpha_uid",
+    "expression",
+    "status",
+    "grade",
+    "submitted_at",
+    "created_at",
+    "settings_json",
+    *(column for column, _, _ in IS_METRICS),
+    "self_correlation",
+    "prod_correlation",
+    "checks_json",
+    "os_json",
+    "train_json",
+    "test_json",
+    "raw_alpha_json",
+    "synced_at",
+)
+
+
+def active_alphas_table_sql() -> str:
+    """Factors the platform reports as ACTIVE (submitted), linked to ``alphas``."""
+    metric_sql = ",\n    ".join(f"{column} {kind}" for column, _, kind in IS_METRICS)
+    return f"""CREATE TABLE IF NOT EXISTS {ACTIVE_ALPHAS_TABLE} (
+    braint_alpha_id TEXT PRIMARY KEY,
+    alpha_uid       TEXT NOT NULL,
+    expression      TEXT NOT NULL,
+    status          TEXT,
+    grade           TEXT,
+    submitted_at    TEXT,
+    created_at      TEXT,
+    settings_json   TEXT,
+    {metric_sql},
+    self_correlation REAL,
+    prod_correlation REAL,
+    checks_json     TEXT,
+    os_json         TEXT,
+    train_json      TEXT,
+    test_json       TEXT,
+    raw_alpha_json  TEXT,
+    synced_at       TEXT NOT NULL,
+    FOREIGN KEY (alpha_uid) REFERENCES alphas (alpha_uid) ON DELETE CASCADE
+);
+"""
+
+
 #: Factors joined with their template metadata; shared so either module can recreate it.
 ALPHA_EXPRESSIONS_VIEW_SQL = """
 DROP VIEW IF EXISTS v_alpha_expressions;
@@ -168,15 +217,22 @@ ORDER BY d.template_id, a.alpha_uid;
 
 #: A run is decisive when it produced results or when the platform rejected the expression
 #: itself. Platform failures are dropped and pending runs stay placeholders, so those
-#: factors remain eligible for a retry.
-BACKTESTED_SQL = f"""
-EXISTS (
-    SELECT 1 FROM {SIMULATIONS_TABLE} AS s
-    JOIN {DETAILS_TABLE} AS d ON d.sim_uid = s.sim_uid
-    WHERE s.alpha_uid = alphas.alpha_uid
-      AND (s.completed = 1 OR d.error_kind = '{ERROR_KIND_FACTOR}')
-)
-"""
+#: factors remain eligible for a retry. A factor already submitted (ACTIVE on the platform)
+#: counts as judged too, otherwise the batch would backtest it again.
+#: The whole expression is parenthesised so ``NOT ({BACKTESTED_SQL})`` negates all of it,
+#: and it refers to the outer table by name, so it must be used over ``FROM alphas``.
+BACKTESTED_SQL = f"""(
+    EXISTS (
+        SELECT 1 FROM {SIMULATIONS_TABLE} AS s
+        JOIN {DETAILS_TABLE} AS d ON d.sim_uid = s.sim_uid
+        WHERE s.alpha_uid = alphas.alpha_uid
+          AND (s.completed = 1 OR d.error_kind = '{ERROR_KIND_FACTOR}')
+    )
+    OR EXISTS (
+        SELECT 1 FROM {ACTIVE_ALPHAS_TABLE} AS aa
+        WHERE aa.alpha_uid = alphas.alpha_uid
+    )
+)"""
 
 
 def is_formatting_error_text(text: str | None) -> bool:
@@ -284,6 +340,10 @@ CREATE INDEX IF NOT EXISTS idx_alpha_simulations_simulated
     ON alpha_simulations (simulated_at);
 CREATE INDEX IF NOT EXISTS idx_alpha_simulation_details_braint
     ON alpha_simulation_details (braint_alpha_id);
+CREATE INDEX IF NOT EXISTS idx_active_alphas_alpha
+    ON active_alphas (alpha_uid);
+CREATE INDEX IF NOT EXISTS idx_active_alphas_submitted
+    ON active_alphas (submitted_at);
 
 -- Same expression with the same settings is one logical run: a re-run overwrites it.
 CREATE UNIQUE INDEX IF NOT EXISTS uq_alpha_simulations_expression_settings
@@ -314,6 +374,7 @@ def _tables() -> str:
             table=SIMULATIONS_TABLE, metric_columns=_metric_column_sql()
         )
         + _DETAILS_TABLE.format(table=DETAILS_TABLE)
+        + active_alphas_table_sql()
         + """
 CREATE TABLE IF NOT EXISTS schema_meta (
     key   TEXT PRIMARY KEY,

@@ -22,6 +22,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable, Sequence
 
+from ..acquisition.active_alphas import sync_active_alphas
 from ..acquisition.config import CredentialsError, load_credentials
 from . import storage
 from .client import BrainSimulationClient, BrainSimulationError
@@ -94,11 +95,13 @@ def load_pending_alphas(
     connection = sqlite3.connect(str(db_path), timeout=60.0)
     connection.row_factory = sqlite3.Row
     try:
+        # BACKTESTED_SQL reads active_alphas, which may not exist in an older database.
+        connection.executescript(storage.active_alphas_table_sql())
         # Repeats are excluded through the runs themselves: a factor counts as backtested
         # only once one of its simulations produced results or was rejected as an expression.
         sql = (
             "SELECT alpha_uid, expression FROM alphas "
-            f"WHERE NOT {storage.BACKTESTED_SQL} ORDER BY alpha_uid"
+            f"WHERE NOT ({storage.BACKTESTED_SQL}) ORDER BY alpha_uid"
         )
         params: list[object] = []
         if limit is not None:
@@ -550,9 +553,31 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="delete runs that failed for platform reasons so their alphas can be retried",
     )
+    parser.add_argument(
+        "--skip-active-sync",
+        action="store_true",
+        help="do not mirror the platform's submitted (ACTIVE) alphas before starting",
+    )
     parser.add_argument("--log-dir", type=Path, default=DEFAULT_LOG_DIR)
     parser.add_argument("--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR"])
     return parser
+
+
+def sync_active(alpha_db: Path, credentials_path: Path | None) -> None:
+    """Mirror the submitted alphas so a factor that is already live is never re-run."""
+    try:
+        stats = sync_active_alphas(alpha_db=alpha_db, credentials_path=credentials_path)
+    except Exception as exc:  # noqa: BLE001 - the batch must still run without the mirror
+        logger.warning("cannot sync the active alphas (%s); continuing without them", exc)
+        return
+    if stats.fetched:
+        logger.info(
+            "active alphas: fetched=%d, new factors=%d, rows=%d%s",
+            stats.fetched,
+            stats.created_alphas,
+            stats.total_rows,
+            "" if stats.complete else " (listing truncated at 1,000)",
+        )
 
 
 def _run_reconcile(args: argparse.Namespace) -> ReconcileStats | None:
@@ -596,12 +621,15 @@ def _run_reconcile(args: argparse.Namespace) -> ReconcileStats | None:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    if args.db is not None:
-        logger.warning("--db is deprecated (backtests live in alpha.db); use --alpha-db")
-        args.alpha_db = args.db
     log_path = setup_logging(args.log_level, args.log_dir)
     if log_path:
         logger.info("logging to %s", log_path)
+
+    if args.db is not None:
+        logger.warning("--db is deprecated (backtests live in alpha.db); use --alpha-db")
+        args.alpha_db = args.db
+    if not args.skip_active_sync:
+        sync_active(args.alpha_db, args.credentials)
 
     try:
         _, settings = load_settings_file(args.settings)

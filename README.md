@@ -93,6 +93,45 @@ uv run python -m worldquant_consultant_project.acquisition `
 `data_fields` 的主键为 `(instrument_type, region, delay, universe, dataset_id, field_id)`，
 重复运行以 upsert 写入，不会产生重复行。
 
+### 已提交因子镜像（平台 ACTIVE → `alpha.db`）
+
+子模块：[`acquisition/active_alphas.py`](./src/worldquant_consultant_project/acquisition/active_alphas.py)
+读取平台 `GET /users/self/alphas?status=ACTIVE`（已提交的因子），写入 `alpha.db` 的
+`active_alphas` 表，并**按表达式挂到 `alphas`**：本地没有这个因子就自动登记一条。
+
+```powershell
+uv run python -m worldquant_consultant_project.acquisition.active_alphas            # 同步一次
+uv run python -m worldquant_consultant_project.acquisition.active_alphas --dry-run  # 只看平台上有多少
+```
+
+- **自动执行**：`simulation.batch` 与 `simulation.optimize` 每次启动都会先跑一次同步
+  （`--skip-active-sync` 可跳过）；同步失败只记 warning，不影响后面的批量任务
+- **平台状态值是 `ACTIVE`**（不是 `SUBMITTED`）；列表接口最多只能翻到前 1,000 条，
+  超出时会截断并在日志里提示
+- **作用**：已提交的因子会被 `BACKTESTED_SQL` 视为「已有判定」，批量回测不会再跑它
+
+| 列 | 内容 |
+|---|---|
+| `braint_alpha_id` | 主键，BRAIN 的 alpha id |
+| `alpha_uid` | 外键 → `alphas.alpha_uid`（级联删除） |
+| `expression` | Fast Expression（来自 `regular.code`） |
+| `status` / `grade` | 平台状态（`ACTIVE`）/ 评级（`AVERAGE` 等） |
+| `submitted_at` / `created_at` | `dateSubmitted` / `dateCreated` |
+| `settings_json` | 回测参数整包（region/universe/delay/decay/neutralization/truncation…） |
+| `is_*` | 样本内指标（`is_sharpe`、`is_fitness`、`is_turnover`… 与回测表同名列） |
+| `self_correlation` / `prod_correlation` | 自相关 / 生产相关（仅已提交因子有值） |
+| `checks_json` | 逐项提交检查结果 |
+| `os_json` / `train_json` / `test_json` | 其它样本指标 |
+| `raw_alpha_json` / `synced_at` | 原始负载 / 本次同步时间 |
+
+```sql
+-- 已提交的因子，按评级与夏普看
+SELECT aa.braint_alpha_id, aa.grade, aa.submitted_at, aa.is_sharpe,
+       json_extract(aa.settings_json, '$.decay') AS decay, aa.expression
+FROM active_alphas AS aa
+ORDER BY aa.submitted_at DESC;
+```
+
 ## 字段打标签（DeepSeek / Gemini → brain.db）
 
 子包：[`src/worldquant_consultant_project/labeling/`](./src/worldquant_consultant_project/labeling/)
@@ -234,6 +273,7 @@ uv run python -m worldquant_consultant_project.simulation.batch --limit 20  # �
 | `--stale-minutes` | 只回进度（无 `Retry-After`）时，超过多少分钟判为停滞（默认 30） |
 | `--abandon-after-hours` | 平台一直回 `Retry-After` 时，超过多少小时放弃（默认 6） |
 | `--purge-platform-errors` | 删除「平台原因」导致失败的记录，使对应因子重新可回测 |
+| `--skip-active-sync` | 启动时不镜像平台的 ACTIVE 因子（见「已提交因子镜像」） |
 
 退出码：`0` 全部成功；`2` 配置/鉴权失败；`3` 存在失败因子（失败记录已入库，可据此排查）。
 
@@ -280,6 +320,7 @@ uv run python -m worldquant_consultant_project.simulation.optimize --delay both
 | `--workers N` / `--limit N` | 覆盖并发数 / 只优化 N 个因子 |
 | `--timeout` / `--progress-every` | 单条轮询超时 / 进度日志间隔 |
 | `--dry-run` | 只报告选中的因子数与剩余待跑组合数 |
+| `--skip-active-sync` | 启动时不镜像平台的 ACTIVE 因子 |
 
 退出码：`0` 全部成功（或无事可做）；`2` 配置/鉴权失败；`3` 存在失败因子。
 
@@ -457,6 +498,7 @@ uv run python -m worldquant_consultant_project.Template_based_alpha_generate
 | `alpha_details`       | 1:1 侧表：`template_id`、`template_name`、`expression_hash`（唯一，去重）、`slot_count`、`formula_pattern`、`label_source`、`slot_fill_json`、`run_id`、`generated_at` |
 | `alpha_slots`         | 每因子每槽位一行：`slot_name`、`slot_index`、`dataset_id`、`field_id`、`description`、`field_type`、`matched_providers`（命中规则的模型）、`labels_json`（各模型 5 维标签）                                 |
 | `alpha_simulations` + `alpha_simulation_details` | 回测记录，`alpha_uid` 外键挂回 `alphas`，一个因子可有多条（详见上文「库表结构（回测表）」） |
+| `active_alphas` | 平台上已提交（ACTIVE）的因子镜像，`alpha_uid` 挂回 `alphas`（详见「已提交因子镜像」一节） |
 | `v_alpha_expressions` | 表达式 + 模板 + 回测标记速查视图 |
 
 `number_of_simulations` 等汇总列由回测自动维护：新生成的因子为 0，等它被回测后由写库逻辑更新。
