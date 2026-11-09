@@ -6,6 +6,8 @@ made for that factor (possibly several, with different settings):
 ``alpha_simulations``          one row per backtest: settings, completion, timing,
                                every in-sample metric and one column per submission check.
 ``alpha_simulation_details``   1:1 side table: BRAIN ids, errors, other samples, raw payloads.
+``alphas``                     the factors themselves, carrying the columns that summarise
+                               their runs (count, tentative flag, formatting error, maxima).
 """
 
 from __future__ import annotations
@@ -53,10 +55,12 @@ TENTATIVE_RULE_VERSION = "2"
 SIMULATIONS_TABLE = "alpha_simulations"
 DETAILS_TABLE = "alpha_simulation_details"
 
-#: Aggregate columns on ``alphas``. They summarise every run of a factor and are
-#: recomputed whenever the factor's runs change.
+#: Columns ``alphas`` gains on top of ``alpha_uid``/``expression``, in table order.
+#: They summarise the factor's runs and are recomputed whenever those runs change.
 ALPHA_AGGREGATE_COLUMNS: tuple[tuple[str, str], ...] = (
+    ("number_of_simulations", "INTEGER"),
     ("tentative_submittable", "INTEGER"),
+    ("is_formatting_error", "INTEGER"),
     ("max_is_sharpe", "REAL"),
     ("max_is_fitness", "REAL"),
     ("max_is_sharpe_delay1", "REAL"),
@@ -67,6 +71,23 @@ ALPHA_AGGREGATE_COLUMNS: tuple[tuple[str, str], ...] = (
 
 #: Delays with their own max-metric columns.
 AGGREGATE_DELAYS: tuple[int, ...] = (1, 0)
+
+#: Substrings that mark an expression-formatting failure (syntax level, not a bad field).
+FORMATTING_ERROR_MARKERS: tuple[str, ...] = (
+    "syntax error",
+    "parse error",
+    "parser error",
+    "invalid syntax",
+    "unexpected token",
+    "unexpected end",
+    "unexpected character",
+    "unbalanced",
+    "unclosed",
+    "missing closing",
+    "invalid expression",
+    "malformed",
+    "cannot parse",
+)
 
 #: ``delay`` of a run, taken from ``settings_json``; NULL when the JSON has no delay.
 _DELAY_SQL = (
@@ -105,21 +126,65 @@ DETAIL_COLUMNS: tuple[str, ...] = (
 ERROR_KIND_FACTOR = "factor"
 ERROR_KIND_PLATFORM = "platform"
 
-_ALPHAS_TABLE = """
-CREATE TABLE IF NOT EXISTS alphas (
-    alpha_uid    TEXT PRIMARY KEY,
-    expression   TEXT NOT NULL,
-    simulated    INTEGER,
-    simulated_at TEXT,
-    tentative_submittable INTEGER,
-    max_is_sharpe REAL,
-    max_is_fitness REAL,
-    max_is_sharpe_delay1 REAL,
-    max_is_fitness_delay1 REAL,
-    max_is_sharpe_delay0 REAL,
-    max_is_fitness_delay0 REAL
-);
+
+def alphas_table_sql(table: str = "alphas") -> str:
+    """Canonical ``alphas`` DDL, shared with the generator so both create the same layout."""
+    columns = [
+        "alpha_uid    TEXT PRIMARY KEY",
+        "expression   TEXT NOT NULL",
+        *(f"{name} {kind} DEFAULT 0" if kind == "INTEGER" else f"{name} {kind}"
+          for name, kind in ALPHA_AGGREGATE_COLUMNS),
+    ]
+    body = ",\n    ".join(columns)
+    return f"CREATE TABLE IF NOT EXISTS {table} (\n    {body}\n);\n"
+
+
+#: Factors joined with their template metadata; shared so either module can recreate it.
+ALPHA_EXPRESSIONS_VIEW_SQL = """
+DROP VIEW IF EXISTS v_alpha_expressions;
+CREATE VIEW v_alpha_expressions AS
+SELECT a.alpha_uid,
+       a.expression,
+       a.number_of_simulations,
+       a.tentative_submittable,
+       a.is_formatting_error,
+       a.max_is_sharpe,
+       a.max_is_fitness,
+       a.max_is_sharpe_delay1,
+       a.max_is_fitness_delay1,
+       a.max_is_sharpe_delay0,
+       a.max_is_fitness_delay0,
+       d.template_id,
+       d.template_name,
+       d.slot_count,
+       d.label_source,
+       d.run_id,
+       d.generated_at
+FROM alphas AS a
+LEFT JOIN alpha_details AS d ON d.alpha_uid = a.alpha_uid
+ORDER BY d.template_id, a.alpha_uid;
 """
+
+
+#: A run is decisive when it produced results or when the platform rejected the expression
+#: itself. Platform failures are dropped and pending runs stay placeholders, so those
+#: factors remain eligible for a retry.
+BACKTESTED_SQL = f"""
+EXISTS (
+    SELECT 1 FROM {SIMULATIONS_TABLE} AS s
+    JOIN {DETAILS_TABLE} AS d ON d.sim_uid = s.sim_uid
+    WHERE s.alpha_uid = alphas.alpha_uid
+      AND (s.completed = 1 OR d.error_kind = '{ERROR_KIND_FACTOR}')
+)
+"""
+
+
+def is_formatting_error_text(text: str | None) -> bool:
+    """Whether an error message points at the expression's format rather than its content."""
+    if not text:
+        return False
+    lowered = text.lower()
+    return any(marker in lowered for marker in FORMATTING_ERROR_MARKERS)
 
 
 def _max_metric_sql(column: str, metric: str | None = None, delay: int | None = None) -> str:
@@ -136,10 +201,31 @@ def _max_metric_sql(column: str, metric: str | None = None, delay: int | None = 
     )
 
 
+def _formatting_error_sql() -> str:
+    markers = " OR ".join(
+        f"d.error LIKE '%{marker}%'" for marker in FORMATTING_ERROR_MARKERS
+    )
+    # Sticky: once a factor has produced a formatting error the flag stays set, because the
+    # run that proved it may later be overwritten by a re-run with the same settings.
+    return f"""CASE WHEN alphas.is_formatting_error = 1 THEN 1
+        WHEN EXISTS (
+            SELECT 1 FROM {SIMULATIONS_TABLE} AS s
+            JOIN {DETAILS_TABLE} AS d ON d.sim_uid = s.sim_uid
+            WHERE s.alpha_uid = alphas.alpha_uid
+              AND d.error IS NOT NULL
+              AND ({markers})
+        ) THEN 1
+        ELSE 0 END"""
+
+
 _ALPHA_AGGREGATE_PARTS: list[str] = [
+    f"""number_of_simulations = (
+        SELECT COUNT(*) FROM {SIMULATIONS_TABLE} AS s
+        WHERE s.alpha_uid = alphas.alpha_uid AND s.completed = 1)""",
     f"""tentative_submittable = COALESCE((
         SELECT MAX(s.tentative_submittable) FROM {SIMULATIONS_TABLE} AS s
         WHERE s.alpha_uid = alphas.alpha_uid), 0)""",
+    f"is_formatting_error = {_formatting_error_sql()}",
     f"max_is_sharpe = {_max_metric_sql('max_is_sharpe')}",
     f"max_is_fitness = {_max_metric_sql('max_is_fitness')}",
 ]
@@ -189,11 +275,6 @@ CREATE TABLE IF NOT EXISTS {table} (
 """
 
 _INDEXES_AND_VIEW = """
-CREATE TABLE IF NOT EXISTS schema_meta (
-    key   TEXT PRIMARY KEY,
-    value TEXT NOT NULL
-);
-
 -- Lookups by factor are the main access path.
 CREATE INDEX IF NOT EXISTS idx_alphas_expression
     ON alphas (expression);
@@ -223,17 +304,39 @@ SELECT s.sim_uid,
        det.braint_alpha_id
 FROM alpha_simulations AS s
 LEFT JOIN alpha_simulation_details AS det ON det.sim_uid = s.sim_uid;
-"""
+""" + ALPHA_EXPRESSIONS_VIEW_SQL
 
-def _schema() -> str:
+
+def _tables() -> str:
+    """Only the tables: the indexes and views must wait for the layout migrations."""
     return (
-        _ALPHAS_TABLE
-        + _SIMULATIONS_TABLE.format(
+        _SIMULATIONS_TABLE.format(
             table=SIMULATIONS_TABLE, metric_columns=_metric_column_sql()
         )
         + _DETAILS_TABLE.format(table=DETAILS_TABLE)
-        + _INDEXES_AND_VIEW
+        + """
+CREATE TABLE IF NOT EXISTS schema_meta (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+"""
     )
+
+
+def ensure_alphas_layout(connection: sqlite3.Connection) -> int:
+    """Create ``alphas`` if needed, drop retired columns and keep its aggregates in sync.
+
+    Callers that own the surrounding schema (the generator) use this so ``alpha.db`` keeps
+    one definition of the table whatever module opens it first.
+    """
+    connection.executescript(alphas_table_sql())
+    migrated = _migrate_alphas_layout(connection)
+    if migrated:
+        # The rebuilt table starts with default aggregates: recompute them from the runs.
+        refresh_all_alpha_metrics(connection)
+    _ensure_alpha_aggregates(connection)
+    connection.commit()
+    return migrated
 
 
 def utc_now() -> str:
@@ -298,13 +401,55 @@ def connect(path: Path | str | None = None, *, initialize: bool = True) -> sqlit
     if not initialize:
         return connection
 
-    connection.executescript(_schema())
+    connection.executescript(_tables())
+    ensure_alphas_layout(connection)
+    connection.executescript(_INDEXES_AND_VIEW)
     _ensure_error_kind(connection)
-    _ensure_alpha_aggregates(connection)
     if _refresh_tentative(connection):
         refresh_all_alpha_metrics(connection)
-        connection.commit()
+    connection.commit()
     return connection
+
+
+#: Columns ``alphas`` no longer keeps; they became per-run information.
+_DROPPED_ALPHA_COLUMNS: tuple[str, ...] = ("simulated", "simulated_at")
+
+
+def _migrate_alphas_layout(connection: sqlite3.Connection) -> int:
+    """Rebuild ``alphas`` without the retired columns, keeping the canonical order.
+
+    SQLite can only append columns, so the table is recreated: the child tables keep their
+    foreign keys because they reference ``alphas`` by name and are untouched.
+    """
+    columns = [row["name"] for row in connection.execute("PRAGMA table_info(alphas)")]
+    if not any(name in columns for name in _DROPPED_ALPHA_COLUMNS):
+        return 0
+
+    canonical = [name for name, _ in ALPHA_AGGREGATE_COLUMNS]
+    keep = [
+        "alpha_uid",
+        "expression",
+        *[name for name in canonical if name in columns],
+    ]
+    connection.commit()
+    connection.execute("PRAGMA foreign_keys = OFF")
+    try:
+        connection.execute("DROP VIEW IF EXISTS v_alpha_expressions")
+        connection.execute("DROP VIEW IF EXISTS v_alpha_simulation_summary")
+        connection.execute("DROP INDEX IF EXISTS idx_alphas_simulated")
+        connection.execute("DROP TABLE IF EXISTS alphas_migrating")
+        connection.executescript(alphas_table_sql("alphas_migrating"))
+        selected = ", ".join(keep)
+        connection.execute(
+            f"INSERT INTO alphas_migrating ({selected}) SELECT {selected} FROM alphas"
+        )
+        dropped = connection.execute("SELECT COUNT(*) FROM alphas").fetchone()[0]
+        connection.execute("DROP TABLE alphas")
+        connection.execute("ALTER TABLE alphas_migrating RENAME TO alphas")
+        connection.commit()
+    finally:
+        connection.execute("PRAGMA foreign_keys = ON")
+    return dropped
 
 
 def _ensure_error_kind(connection: sqlite3.Connection) -> int:
@@ -371,9 +516,10 @@ def refresh_alpha_metrics(
 ) -> int:
     """Recompute the aggregate columns of the given factors from their runs.
 
-    ``tentative_submittable`` is 1 as soon as one run allows submission, ``max_is_sharpe``
-    and ``max_is_fitness`` are the best in-sample values over all runs (they may come from
-    different runs).
+    ``number_of_simulations`` counts the runs that produced results,
+    ``tentative_submittable`` is 1 as soon as one run allows submission,
+    ``is_formatting_error`` is 1 when any run failed on the expression's format, and the
+    ``max_*`` columns hold the best in-sample values (which may come from different runs).
     """
     uids = [alpha_uids] if isinstance(alpha_uids, str) else list(alpha_uids)
     uids = [uid for uid in dict.fromkeys(uids) if uid]
@@ -410,7 +556,8 @@ def ensure_alpha(connection: sqlite3.Connection, expression: str) -> tuple[str, 
         return str(row["alpha_uid"]), False
     alpha_uid = uuid.uuid4().hex
     connection.execute(
-        "INSERT INTO alphas (alpha_uid, expression, simulated, simulated_at) VALUES (?, ?, NULL, NULL)",
+        "INSERT INTO alphas (alpha_uid, expression, number_of_simulations, "
+        "tentative_submittable, is_formatting_error) VALUES (?, ?, 0, 0, 0)",
         (alpha_uid, expression),
     )
     connection.commit()
@@ -425,33 +572,15 @@ def find_alpha_uid(connection: sqlite3.Connection, expression: str) -> str | Non
     return str(row["alpha_uid"]) if row else None
 
 
-def mark_alpha_simulated(
-    connection: sqlite3.Connection, alpha_uid: str, when: str | None = None
-) -> int:
-    """Flag the factor as backtested."""
-    updated = connection.execute(
-        "UPDATE alphas SET simulated = 1, simulated_at = ? WHERE alpha_uid = ?",
-        (when or utc_now(), alpha_uid),
-    ).rowcount
-    connection.commit()
-    return updated
-
-
-def unmark_alpha_simulated(connection: sqlite3.Connection, alpha_uids: Iterable[str]) -> int:
-    """Reset the backtested flag so the factor is picked up again."""
-    uids = [uid for uid in dict.fromkeys(alpha_uids) if uid]
-    if not uids:
-        return 0
-    updated = 0
-    for start in range(0, len(uids), 200):
-        batch = uids[start : start + 200]
-        updated += connection.execute(
-            f"UPDATE alphas SET simulated = NULL, simulated_at = NULL "
-            f"WHERE alpha_uid IN ({','.join('?' * len(batch))})",
-            batch,
-        ).rowcount
-    connection.commit()
-    return updated
+def has_backtest(connection: sqlite3.Connection, alpha_uid: str) -> bool:
+    """Whether the platform already judged this factor (results, or a factor-side error)."""
+    row = connection.execute(
+        f"SELECT 1 FROM {SIMULATIONS_TABLE} AS s "
+        f"JOIN {DETAILS_TABLE} AS d ON d.sim_uid = s.sim_uid "
+        "WHERE s.alpha_uid = ? AND (s.completed = 1 OR d.error_kind = ?) LIMIT 1",
+        (alpha_uid, ERROR_KIND_FACTOR),
+    ).fetchone()
+    return row is not None
 
 
 def ensure_check_columns(

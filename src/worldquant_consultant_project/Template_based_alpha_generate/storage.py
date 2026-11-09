@@ -1,6 +1,8 @@
 """Persistence for generated alphas: ``data/alpha.db``.
 
-``alphas``        the lean table: uid, expression and the backtest markers.
+``alphas``        the lean table: uid, expression and the columns that summarise the factor's
+                  backtests (owned by ``simulation.storage``, reused here so both create the
+                  same layout).
 ``alpha_details`` 1:1 side table with template, dedupe hash and batch metadata.
 ``alpha_slots``   one row per filled slot (field provenance).
 """
@@ -15,18 +17,15 @@ from pathlib import Path
 from typing import Iterable, Sequence
 
 from ..acquisition.config import DEFAULT_DATA_DIR
+from ..simulation.storage import (
+    ALPHA_EXPRESSIONS_VIEW_SQL,
+    alphas_table_sql,
+    ensure_alphas_layout,
+)
 from .generator import GeneratedAlpha
 
 DEFAULT_DB_PATH = DEFAULT_DATA_DIR / "alpha.db"
 
-_ALPHAS_TABLE = """
-CREATE TABLE IF NOT EXISTS {table} (
-    alpha_uid    TEXT PRIMARY KEY,
-    expression   TEXT NOT NULL,
-    simulated    INTEGER,
-    simulated_at TEXT
-);
-"""
 
 _DETAILS_TABLE = """
 CREATE TABLE IF NOT EXISTS alpha_details (
@@ -61,32 +60,15 @@ CREATE TABLE IF NOT EXISTS alpha_slots (
 """
 
 _INDEXES_AND_VIEW = """
-CREATE INDEX IF NOT EXISTS idx_alphas_simulated   ON alphas (simulated);
+CREATE INDEX IF NOT EXISTS idx_alphas_expression  ON alphas (expression);
 CREATE INDEX IF NOT EXISTS idx_details_template   ON alpha_details (template_id);
 CREATE INDEX IF NOT EXISTS idx_details_run        ON alpha_details (run_id);
 CREATE INDEX IF NOT EXISTS idx_details_created    ON alpha_details (generated_at);
 CREATE INDEX IF NOT EXISTS idx_alpha_slots_field  ON alpha_slots (field_id);
+""" + ALPHA_EXPRESSIONS_VIEW_SQL
 
-DROP VIEW IF EXISTS v_alpha_expressions;
-CREATE VIEW v_alpha_expressions AS
-SELECT a.alpha_uid,
-       a.expression,
-       a.simulated,
-       a.simulated_at,
-       d.template_id,
-       d.template_name,
-       d.slot_count,
-       d.label_source,
-       d.run_id,
-       d.generated_at
-FROM alphas AS a
-LEFT JOIN alpha_details AS d ON d.alpha_uid = a.alpha_uid
-ORDER BY d.template_id, a.alpha_uid;
-"""
-
-SCHEMA = (
-    _ALPHAS_TABLE.format(table="alphas") + _DETAILS_TABLE + _SLOTS_TABLE + _INDEXES_AND_VIEW
-)
+#: ``alphas`` itself comes from ``simulation.storage`` so both modules agree on its layout.
+SCHEMA = _DETAILS_TABLE + _SLOTS_TABLE
 
 
 def utc_now() -> str:
@@ -112,7 +94,7 @@ def _migrate_wide_alphas(connection: sqlite3.Connection) -> bool:
             "DROP TABLE IF EXISTS alphas_new;"
             "DROP TABLE IF EXISTS alpha_details;"
         )
-        connection.executescript(_ALPHAS_TABLE.format(table="alphas_new"))
+        connection.executescript(alphas_table_sql("alphas_new"))
         connection.executescript(_DETAILS_TABLE)
         # Both markers stay NULL until the alpha is actually backtested.
         connection.execute(
@@ -147,6 +129,8 @@ def connect(path: Path | str | None = None) -> sqlite3.Connection:
     connection.execute("PRAGMA foreign_keys = ON")
     if not _migrate_wide_alphas(connection):
         connection.executescript(SCHEMA)
+        ensure_alphas_layout(connection)
+        connection.executescript(_INDEXES_AND_VIEW)
         connection.commit()
     return connection
 
@@ -187,7 +171,7 @@ def save(
 
     for alpha in alphas:
         alpha_uid = uuid.uuid4().hex
-        core_rows.append((alpha_uid, alpha.expression, None, None))
+        core_rows.append((alpha_uid, alpha.expression, 0, 0, 0))
         detail_rows.append(
             (
                 alpha_uid,
@@ -222,7 +206,8 @@ def save(
 
     try:
         connection.executemany(
-            "INSERT INTO alphas (alpha_uid, expression, simulated, simulated_at) VALUES (?, ?, ?, ?)",
+            "INSERT INTO alphas (alpha_uid, expression, number_of_simulations, "
+            "tentative_submittable, is_formatting_error) VALUES (?, ?, ?, ?, ?)",
             core_rows,
         )
         connection.executemany(
@@ -263,7 +248,7 @@ def summary(connection: sqlite3.Connection) -> list[sqlite3.Row]:
             """
             SELECT d.template_id,
                    COUNT(*) AS alphas,
-                   SUM(CASE WHEN a.simulated IS NOT NULL THEN 1 ELSE 0 END) AS simulated,
+                   SUM(CASE WHEN a.number_of_simulations > 0 THEN 1 ELSE 0 END) AS simulated,
                    COUNT(DISTINCT d.run_id) AS runs,
                    MIN(d.generated_at) AS first_generated
             FROM alphas AS a

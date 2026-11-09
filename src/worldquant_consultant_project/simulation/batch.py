@@ -1,4 +1,4 @@
-"""Batch backtests: run every un-simulated alpha from ``alpha.db`` with a thread pool.
+"""Batch backtests: run every alpha ``alpha.db`` has no verdict for yet, with a thread pool.
 
 Concurrency comes from ``maximum_concurrent_number`` (the account's simultaneous
 simulation allowance) and the parameters come from ``batch_simulation_settings.json``.
@@ -87,16 +87,18 @@ class ReconcileStats:
 def load_pending_alphas(
     alpha_db: Path | str, *, limit: int | None = None
 ) -> list[PendingAlpha]:
-    """Alphas that have never been backtested, in insertion order."""
+    """Alphas the platform has not judged yet, in insertion order."""
     db_path = Path(alpha_db)
     if not db_path.is_file():
         raise FileNotFoundError(f"alpha database not found: {db_path}")
     connection = sqlite3.connect(str(db_path), timeout=60.0)
     connection.row_factory = sqlite3.Row
     try:
+        # Repeats are excluded through the runs themselves: a factor counts as backtested
+        # only once one of its simulations produced results or was rejected as an expression.
         sql = (
             "SELECT alpha_uid, expression FROM alphas "
-            "WHERE simulated IS NULL ORDER BY alpha_uid"
+            f"WHERE NOT {storage.BACKTESTED_SQL} ORDER BY alpha_uid"
         )
         params: list[object] = []
         if limit is not None:
@@ -121,25 +123,25 @@ def _age_seconds(simulated_at: str | None) -> float:
 
 
 def purge_platform_errors(*, alpha_db: Path | str) -> tuple[int, int]:
-    """Delete platform-caused failures and unmark their alphas.
+    """Delete platform-caused failures, which also makes those factors retryable again.
 
-    Returns ``(deleted_runs, unmarked_alphas)``.
+    Returns ``(deleted_runs, refreshed_alphas)``.
     """
     connection = storage.connect(alpha_db)
     try:
         rows = storage.platform_error_rows(connection)
         if not rows:
             return 0, 0
-        alpha_uids = [row["alpha_uid"] for row in rows]
+        alpha_uids = {row["alpha_uid"] for row in rows}
         deleted = storage.delete_simulations(connection, [row["sim_uid"] for row in rows])
-        unmarked = storage.unmark_alpha_simulated(connection, alpha_uids)
+        refreshed = storage.refresh_alpha_metrics(connection, alpha_uids)
     finally:
         connection.close()
 
     logger.info(
-        "purged %d platform-caused run(s); unmarked %d alpha(s)", deleted, unmarked
+        "purged %d platform-caused run(s); refreshed %d alpha(s)", deleted, refreshed
     )
-    return deleted, unmarked
+    return deleted, refreshed
 
 
 class _ClientPool:
@@ -337,11 +339,6 @@ def outcome_bucket(outcome: SimulationOutcome) -> str:
     return "platform"
 
 
-def should_mark_simulated(outcome: SimulationOutcome) -> bool:
-    """Whether this outcome justifies marking the alpha as backtested."""
-    return outcome_bucket(outcome) in ("ok", "factor")
-
-
 def run_batch(
     alphas: Sequence[PendingAlpha],
     *,
@@ -429,7 +426,7 @@ def run_batch(
                         if outcome.limit_scope == "daily":
                             # No further submission can succeed today.
                             stats.abort_reason = "daily simulation limit reached"
-                # A crash before reaching the platform leaves the alpha unsimulated for a retry.
+                # A crash before reaching the platform leaves the alpha without a verdict.
                 completed += 1
 
                 if should_abort():
@@ -494,7 +491,7 @@ def setup_logging(level: str, log_dir: Path) -> Path | None:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="worldquant_consultant_project.simulation.batch",
-        description="Backtest every un-simulated alpha from alpha.db with a thread pool.",
+        description="Backtest every alpha without a verdict yet, using a thread pool.",
     )
     parser.add_argument(
         "--alpha-db",
@@ -551,7 +548,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--purge-platform-errors",
         action="store_true",
-        help="delete runs that failed for platform reasons and unmark their alphas",
+        help="delete runs that failed for platform reasons so their alphas can be retried",
     )
     parser.add_argument("--log-dir", type=Path, default=DEFAULT_LOG_DIR)
     parser.add_argument("--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR"])
@@ -575,9 +572,7 @@ def _run_reconcile(args: argparse.Namespace) -> ReconcileStats | None:
             stale_after_seconds=max(args.stale_minutes, 0) * 60,
             abandon_after_seconds=max(args.abandon_after_hours, 0) * 3600,
         )
-        marked = storage.mark_alpha_simulated
-        for uid in stats.resolved_alpha_uids:
-            marked(connection, uid)
+        # Each recovered or failed run refreshed its factor through write_outcome.
         connection.commit()
     except BrainSimulationError as exc:
         logger.error("cannot reconcile interrupted rows: %s", exc)
@@ -588,12 +583,12 @@ def _run_reconcile(args: argparse.Namespace) -> ReconcileStats | None:
 
     if stats.resolved_alpha_uids:
         logger.info(
-            "marked %d alpha(s) as backtested after reconciliation",
+            "%d alpha(s) now have a verdict from the platform after reconciliation",
             len(stats.resolved_alpha_uids),
         )
     if stats.interrupted_alpha_uids:
         logger.info(
-            "%d alpha(s) left unmarked so they stay retryable (no verdict from the platform)",
+            "%d alpha(s) stay retryable (no verdict from the platform)",
             len(stats.interrupted_alpha_uids),
         )
     return stats
@@ -641,8 +636,8 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT_OK
 
     if args.purge_platform_errors:
-        deleted, unmarked = purge_platform_errors(alpha_db=args.alpha_db)
-        print(f"deleted {deleted} platform-caused run(s); unmarked {unmarked} alpha(s)")
+        deleted, refreshed = purge_platform_errors(alpha_db=args.alpha_db)
+        print(f"deleted {deleted} platform-caused run(s); refreshed {refreshed} alpha(s)")
         return EXIT_OK
 
     reconcile = not args.no_reconcile

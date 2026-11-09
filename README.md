@@ -212,10 +212,10 @@ uv run python -m worldquant_consultant_project.simulation.batch             # �
 uv run python -m worldquant_consultant_project.simulation.batch --limit 20  # 只跑 20 个
 ```
 
-- **取数**：从 `data/alpha.db` 的 `alphas` 表读取 `simulated IS NULL` 的因子（按 `alpha_uid` 排序）
+- **取数**：从 `data/alpha.db` 的 `alphas` 表读取**还没被平台判定过**的因子（按 `alpha_uid` 排序）——「判定过」指有一条回测出了结果，或有一条回测被判为表达式本身有错
 - **并发**：线程池大小取自 [`maximum_concurrent_number`](./src/worldquant_consultant_project/simulation/maximum_concurrent_number)（当前 `3`，即账号允许的同时回测数），`--workers` 可临时覆盖
 - **参数**：取自 [`batch_simulation_settings.json`](./src/worldquant_consultant_project/simulation/batch_simulation_settings.json)（`type` + `settings`），每个线程独立登录并复用会话
-- **写回**：回测完成（无论成功或因子报错）后把 `alphas.simulated` 置 1、`simulated_at` 写入时间；本地崩溃（未真正提交）与平台报错不标记，便于重试
+- **写回**：回测完成（无论成功或因子报错）后自动刷新该因子的汇总列（`number_of_simulations`、`tentative_submittable`、`is_formatting_error`、`max_*`）；本地崩溃（未真正提交）与平台报错不留下记录，因子下次仍会被取到
 - **覆盖**：`alpha_simulations` 上建有 `(expression, settings_json)` 唯一索引，同一表达式 + 同一参数重跑会**覆盖原行并保留原 `sim_uid`**，不会新增重复记录；换个参数则是**新增一行**，同一个 `alpha_uid` 下可以有多条
 - **限流**：提交遇到 429（超出并发额度）会按 `Retry-After` 等待后重试，不会让该因子失败
 - **优化设置**：[`optimization_simulation_settings.json`](./src/worldquant_consultant_project/simulation/optimization_simulation_settings.json) 目前是空占位（`{}`），预留给后续的参数优化环节；可用 `settings.OPTIMIZATION_SETTINGS_PATH` 取到路径
@@ -239,13 +239,13 @@ uv run python -m worldquant_consultant_project.simulation.batch --limit 20  # �
 
 ### 错误分类：平台原因 vs 因子原因
 
-只有**平台真正评估过该因子**并拒绝它，才算「已回测」；平台侧问题（额度、会话、服务异常）
+只有**平台真正评估过该因子**并拒绝它，才算「有判定」；平台侧问题（额度、会话、服务异常）
 不算，因子会留在待回测队列里下次重试。
 
-| 类型 | 典型情况 | 是否入库 | 是否标记已回测 |
+| 类型 | 典型情况 | 是否入库 | 是否算「已被平台判定」 |
 |---|---|---|---|
-| **成功** | 回测完成 | 是（含 IS 指标） | 是 |
-| **因子原因** | 表达式语法错误、`Operator ts_delta does not support event inputs`、未知字段（HTTP 400 / 模拟 `status=ERROR`） | 是（`error_kind='factor'`） | **是** |
+| **成功** | 回测完成 | 是（含 IS 指标） | 是（计入 `number_of_simulations`） |
+| **因子原因** | 表达式语法错误、`Operator ts_delta does not support event inputs`、未知字段（HTTP 400 / 模拟 `status=ERROR`） | 是（`error_kind='factor'`） | **是**（语法类还会置 `is_formatting_error=1`） |
 | **平台原因** | 每日/并发额度（`DAILY_SIMULATION_LIMIT_EXCEEDED`、`CONCURRENT_SIMULATION_LIMIT_EXCEEDED`）、会话过期 401、403、5xx、连接中断 | **否**（占位行会被删除） | **否** |
 | 回测超时 | 平台仍在计算 | 是（占位行，待收尾） | 否 |
 
@@ -254,14 +254,14 @@ uv run python -m worldquant_consultant_project.simulation.batch --limit 20  # �
 - **401 自动重鉴权**：提交时会话过期会被识别、重新登录并重试（最多 3 次），不再被误判为因子失败
 - **额度保护**：连续平台失败达到 `max(5, 2×workers)` 次，或收到每日额度错误时，批量立即停止，
   剩余因子保持待回测
-- **历史数据清理**：`--purge-platform-errors` 会删除 `error_kind='platform'` 的记录，并把
-  对应 `alpha_uid` 的 `alphas.simulated` 重置为 NULL（旧记录在首次连接时会自动回填 `error_kind`）
+- **历史数据清理**：`--purge-platform-errors` 会删除 `error_kind='platform'` 的记录，并刷新受影响因子的
+  汇总列，使其重新进入待回测队列（旧记录在首次连接时会自动回填 `error_kind`）
 
 ### 平台侧停滞 / 超时的处理
 
 **回测中轮询超时不会丢结果**：单条轮询超过 `--timeout`（默认 900s）时，不再记成失败，而是把该行
-留作「占位行」（`completed=0`、无 `error`、无 `finished_at`、保留 `braint_sim_id`），并在
-`alpha.db` 中**不**标记为已回测，等下一次收尾时再去平台取结果。
+留作「占位行」（`completed=0`、无 `error`、`finished_at` 为空、保留 `braint_sim_id`），它不计入
+`number_of_simulations`，等下一次收尾时再去平台取结果。
 
 **收尾时的三种时限**（批量启动或 `--reconcile-only` 时执行）：
 
@@ -275,8 +275,8 @@ uv run python -m worldquant_consultant_project.simulation.batch --limit 20  # �
 | 只回进度且无 `Retry-After`，行龄 ≥ `--stale-minutes` | 判定停滞：`error="interrupted: stalled after Xh (...)"` |
 | 只回进度且行龄 < `--stale-minutes` | 保留，下次再收尾 |
 
-收尾成功的因子会在 `alpha.db` 里标记 `simulated=1`，避免重复提交；被判 interrupted 的因子保持
-未回测状态，可重新进入下一批。
+收尾成功的因子会因为那条回测变成「已完成」而计入 `number_of_simulations`，批量不会再取到它；
+被判 interrupted 的行没有结果，因子仍会进入下一批。
 
 ### 库表结构（`data/alpha.db` 里的回测表）
 
@@ -407,17 +407,23 @@ uv run python -m worldquant_consultant_project.Template_based_alpha_generate
 
 | 表 / 视图               | 内容                                                                                                                                                                                                                        |
 | ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `alphas`              | **精简主表**，一行一个因子：`alpha_uid`（主键）、`expression`、`simulated`、`simulated_at`，外加由回测汇总出来的指标列：`tentative_submittable`（任一回测可提交即 1，否则 0）、`max_is_sharpe`、`max_is_fitness`（所有回测的最大值），以及按 delay 分组的 `max_is_sharpe_delay1` / `max_is_fitness_delay1` / `max_is_sharpe_delay0` / `max_is_fitness_delay0` |
+| `alphas`              | **精简主表**，一行一个因子：`alpha_uid`（主键）、`expression`，外加由回测汇总出来的列：`number_of_simulations`（有结果的回测条数）、`tentative_submittable`（任一回测可提交即 1，否则 0）、`is_formatting_error`（出现过格式类报错即 1）、`max_is_sharpe`、`max_is_fitness` 以及按 delay 分组的 `max_is_sharpe_delay1` / `max_is_fitness_delay1` / `max_is_sharpe_delay0` / `max_is_fitness_delay0` |
 | `alpha_details`       | 1:1 侧表：`template_id`、`template_name`、`expression_hash`（唯一，去重）、`slot_count`、`formula_pattern`、`label_source`、`slot_fill_json`、`run_id`、`generated_at` |
 | `alpha_slots`         | 每因子每槽位一行：`slot_name`、`slot_index`、`dataset_id`、`field_id`、`description`、`field_type`、`matched_providers`（命中规则的模型）、`labels_json`（各模型 5 维标签）                                 |
 | `alpha_simulations` + `alpha_simulation_details` | 回测记录，`alpha_uid` 外键挂回 `alphas`，一个因子可有多条（详见上文「库表结构（回测表）」） |
 | `v_alpha_expressions` | 表达式 + 模板 + 回测标记速查视图 |
 
-`simulated` / `simulated_at` 在生成时**保持 NULL**；等该因子被回测后再把 `simulated` 置 1
-并写入 `simulated_at` 时间戳。查未回测的因子：
+`number_of_simulations` 等汇总列由回测自动维护：新生成的因子为 0，等它被回测后由写库逻辑更新。
+查还没有被平台判定过的因子：
 
 ```sql
-SELECT alpha_uid, expression FROM alphas WHERE simulated IS NULL;
+SELECT alpha_uid, expression FROM alphas
+WHERE NOT EXISTS (
+    SELECT 1 FROM alpha_simulations AS s
+    JOIN alpha_simulation_details AS d ON d.sim_uid = s.sim_uid
+    WHERE s.alpha_uid = alphas.alpha_uid
+      AND (s.completed = 1 OR d.error_kind = 'factor')
+);
 ```
 
 只想回测模板生成、且还没跑过的因子时：
@@ -425,7 +431,12 @@ SELECT alpha_uid, expression FROM alphas WHERE simulated IS NULL;
 ```sql
 SELECT a.alpha_uid, a.expression
 FROM alphas AS a JOIN alpha_details AS d USING (alpha_uid)
-WHERE a.simulated IS NULL;
+WHERE NOT EXISTS (
+    SELECT 1 FROM alpha_simulations AS s
+    JOIN alpha_simulation_details AS d2 ON d2.sim_uid = s.sim_uid
+    WHERE s.alpha_uid = a.alpha_uid
+      AND (s.completed = 1 OR d2.error_kind = 'factor')
+);
 ```
 
 按因子查它的全部回测：
@@ -442,7 +453,9 @@ WHERE s.alpha_uid = '...' ORDER BY s.simulated_at DESC;
 
 | 列 | 规则 |
 |---|---|
+| `number_of_simulations` | 该因子**有结果**的回测条数（`completed = 1`；占位行、报错行不算） |
 | `tentative_submittable` | 该因子**任一**回测的 `tentative_submittable = 1` 就记 1，否则 0（没有任何回测也是 0） |
+| `is_formatting_error` | 该因子**曾经**出现过格式类报错就记 1，从未出现记 0（粘性：置 1 后不因重跑或删记录而回落） |
 | `max_is_sharpe` | 该因子所有回测 `is_sharpe` 的最大值（无值为 NULL） |
 | `max_is_fitness` | 该因子所有回测 `is_fitness` 的最大值（无值为 NULL） |
 | `max_is_sharpe_delay1` / `max_is_fitness_delay1` | 同上，但只在 `delay = 1` 的回测里取最大 |
@@ -450,7 +463,10 @@ WHERE s.alpha_uid = '...' ORDER BY s.simulated_at DESC;
 
 - delay 取自每条回测 `settings_json` 里的 `delay`（JSON 损坏或缺失时该条不参与分组统计）
 - 各最大值**可以来自不同的回测**，不要求出现在同一行；某个 delay 没有回测时，对应两列为 NULL
-- 一个因子只要有一条可提交的回测，`tentative_submittable` 就是 1，与 delay 无关
+- 「格式类报错」指表达式写法/语法层面的错误，判定词表是 `storage.FORMATTING_ERROR_MARKERS`
+  （`syntax error`、`unexpected token`、`unbalanced`、`missing closing` 等）；
+  像 `Operator ts_delta does not support event inputs` 这种字段/类型错误不算
+- 想让某个因子的粘性标记回落，手动 `UPDATE alphas SET is_formatting_error = 0 WHERE alpha_uid = '...'` 即可
 
 直接筛「值得提交」的因子：
 

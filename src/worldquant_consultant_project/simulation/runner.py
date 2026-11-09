@@ -214,10 +214,6 @@ def run_simulation(
                 simulation_body=simulation_body,
                 alpha_body=alpha_body,
             )
-            if outcome.ok or outcome.factor_caused:
-                # The platform judged this factor, so it counts as backtested. Pending and
-                # platform failures leave the flag alone so the factor is retried later.
-                storage.mark_alpha_simulated(connection, alpha_uid)
         connection.close()
 
     if outcome.ok:
