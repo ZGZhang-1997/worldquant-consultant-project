@@ -144,7 +144,7 @@ def purge_platform_errors(*, alpha_db: Path | str) -> tuple[int, int]:
     return deleted, refreshed
 
 
-class _ClientPool:
+class ClientPool:
     """One authenticated client per worker thread (requests sessions are not thread safe)."""
 
     def __init__(self, credentials, *, poll_timeout: float, max_submit_retries: int) -> None:
@@ -357,7 +357,7 @@ def run_batch(
     # Initialise the schema once; workers then open cheap connections.
     storage.connect(alpha_db).close()
     credentials = load_credentials(credentials_path)
-    pool = _ClientPool(credentials, poll_timeout=timeout, max_submit_retries=60)
+    pool = ClientPool(credentials, poll_timeout=timeout, max_submit_retries=60)
     started = time.monotonic()
     completed = 0
     consecutive_platform = 0

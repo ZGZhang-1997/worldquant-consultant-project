@@ -1,0 +1,10 @@
+{
+  "delay1": {
+    "is_sharpe_lower_limit": ["1.25"],
+    "is_fitness_lower_limit": ["0.9"]    
+  },
+  "delay0": {
+    "is_sharpe_lower_limit": ["2"],
+    "is_fitness_lower_limit": ["1.2"]
+  }
+}

@@ -218,7 +218,7 @@ uv run python -m worldquant_consultant_project.simulation.batch --limit 20  # �
 - **写回**：回测完成（无论成功或因子报错）后自动刷新该因子的汇总列（`number_of_simulations`、`tentative_submittable`、`is_formatting_error`、`max_*`）；本地崩溃（未真正提交）与平台报错不留下记录，因子下次仍会被取到
 - **覆盖**：`alpha_simulations` 上建有 `(expression, settings_json)` 唯一索引，同一表达式 + 同一参数重跑会**覆盖原行并保留原 `sim_uid`**，不会新增重复记录；换个参数则是**新增一行**，同一个 `alpha_uid` 下可以有多条
 - **限流**：提交遇到 429（超出并发额度）会按 `Retry-After` 等待后重试，不会让该因子失败
-- **优化设置**：[`optimization_simulation_settings.json`](./src/worldquant_consultant_project/simulation/optimization_simulation_settings.json) 目前是空占位（`{}`），预留给后续的参数优化环节；可用 `settings.OPTIMIZATION_SETTINGS_PATH` 取到路径
+- **优化设置**：[`optimization_simulation_settings.json`](./src/worldquant_consultant_project/simulation/optimization_simulation_settings.json) 由下面的「参数优化」使用
 
 | 参数 | 说明 |
 |---|---|
@@ -233,9 +233,50 @@ uv run python -m worldquant_consultant_project.simulation.batch --limit 20  # �
 | `--no-reconcile` | 跳过启动时的自动收尾 |
 | `--stale-minutes` | 只回进度（无 `Retry-After`）时，超过多少分钟判为停滞（默认 30） |
 | `--abandon-after-hours` | 平台一直回 `Retry-After` 时，超过多少小时放弃（默认 6） |
-| `--purge-platform-errors` | 删除「平台原因」导致失败的记录，并取消对应因子的已回测标记 |
+| `--purge-platform-errors` | 删除「平台原因」导致失败的记录，使对应因子重新可回测 |
 
 退出码：`0` 全部成功；`2` 配置/鉴权失败；`3` 存在失败因子（失败记录已入库，可据此排查）。
+
+### 参数优化（挑出好因子 → 参数网格重跑）
+
+```powershell
+# 只看会选中多少因子、还有多少组参数要跑，不提交
+uv run python -m worldquant_consultant_project.simulation.optimize --delay delay1 --dry-run
+# 实际执行（delay1 是默认值，可省略）
+uv run python -m worldquant_consultant_project.simulation.optimize
+# 换成 delay=0 的那一组阈值
+uv run python -m worldquant_consultant_project.simulation.optimize --delay delay0
+```
+
+两步：
+
+1. **挑选因子**：`--delay` 决定用哪一组阈值，从
+   [`settings_for_choosing_alphas_to_optimize.json`](./src/worldquant_consultant_project/simulation/settings_for_choosing_alphas_to_optimize.json)
+   读 `delay1` / `delay0` 的 `is_sharpe_lower_limit` 与 `is_fitness_lower_limit`，
+   要求 `alphas.max_is_sharpe_delay{1,0}` 与 `max_is_fitness_delay{1,0}` **同时**大于等于阈值
+2. **参数扫描**：把
+   [`optimization_simulation_settings.json`](./src/worldquant_consultant_project/simulation/optimization_simulation_settings.json)
+   的 `search_space` 各轴做**笛卡尔积**，逐组参数回测这些因子；`delay` 一律用启动参数，
+   文件里若写了 `delay` 会被忽略（并打一条 warning）
+
+- **跳过已跑过的组合**：每组回测提交前都会按 `(expression, settings_json)` 查一次库，已有记录就直接
+  跳过，因此中途停掉再跑一次会自动续上，不会重复烧额度
+- **写回**：与批量回测共用同一条落库路径，`alphas` 上的 `number_of_simulations`、`max_*`、
+  `tentative_submittable` 会随扫描结果一起更新（新参数的回测成为该因子的新记录）
+- **并发**：线程池大小同样取自 `maximum_concurrent_number`（`--workers` 可覆盖）
+- **额度保护**：连续平台失败达到 `max(5, 2×workers)` 次会中止整轮，剩余组合保持未跑，下次续跑
+
+| 参数 | 说明 |
+|---|---|
+| `--delay` | `delay1`（默认）/ `delay0`，也接受 `1` / `0` |
+| `--selection` | 选因子的阈值文件，默认 `settings_for_choosing_alphas_to_optimize.json` |
+| `--search-space` | 参数网格文件，默认 `optimization_simulation_settings.json` |
+| `--alpha-db` / `--concurrency-file` | 与批量回测相同 |
+| `--workers N` / `--limit N` | 覆盖并发数 / 只优化 N 个因子 |
+| `--timeout` / `--progress-every` | 单条轮询超时 / 进度日志间隔 |
+| `--dry-run` | 只报告选中的因子数与剩余待跑组合数 |
+
+退出码：`0` 全部成功（或无事可做）；`2` 配置/鉴权失败；`3` 存在失败因子。
 
 ### 错误分类：平台原因 vs 因子原因
 
