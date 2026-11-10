@@ -377,6 +377,9 @@ uv run python -m worldquant_consultant_project.simulation.optimize --delay both
 | `alpha_uid` | 外键 → `alphas.alpha_uid`，这是「按因子查回测」的入口 |
 | `expression` | 因子表达式（冗余存一份，便于直接查看/去重） |
 | `tentative_submittable` | 初判可提交（1/0）：其他检查全部 `PASS`，且 `SELF_CORRELATION` 为 `PASS` 或 `PENDING`（只有它为 `FAIL` 才算不通过） |
+| `submittable` | 真实结论（`PASS`/`FAIL`/NULL）：实测自相关低于阈值记 `PASS`，否则 `FAIL`，没测过为 NULL |
+| `self_correlation` | 实测最大自相关值（平台 `/correlations/self` 的 `max`） |
+| `self_correlation_checked_at` | 自相关取数时间 |
 | `settings_json` | 回测设置整包 JSON（universe / delay / decay / neutralization / truncation … 不再拆列） |
 | `completed` | 是否跑完（1/0） |
 | `simulated_at` | 回测开始运行的时间（不是提交 alpha 的时间） |
@@ -423,28 +426,42 @@ ORDER BY s.simulated_at DESC;
 ### 关于「是否可提交」
 
 BRAIN 的 `/alphas/{id}` 响应里**没有**「能否提交」字段，提交资格完全由 `is.checks[]` 决定。
+而 `SELF_CORRELATION` 在回测结束时永远是 `PENDING`——平台只在需要时（提交时或你主动请求）
+才拿这个 alpha 去和账号里的因子池做相关性回归。所以本地有两级判定：
 
-`tentative_submittable` 是回测后即可得到的初判：
+| 列 | 含义 |
+|---|---|
+| `tentative_submittable` | 回测后立刻可得的初判：其余检查全 `PASS` 且 `SELF_CORRELATION` 不是 `FAIL`（`PASS`/`PENDING` 都算通过）→ 1，否则 0 |
+| `submittable` | **真实结论**：只有自相关算出来之后才有值，`< 0.7` 记 `PASS`，否则记 `FAIL`；没测过为 NULL |
+| `self_correlation` | 实测的最大自相关值（`/alphas/{id}/correlations/self` 返回的 `max`） |
+| `self_correlation_checked_at` | 取这个值的时间 |
 
-- 其余 7 项检查必须全部为 `PASS`
-- `SELF_CORRELATION` 为 `PASS` **或 `PENDING`** 都可以接受（提交前通常一直是 `PENDING`）
-- 只有 `SELF_CORRELATION` 已经明确为 `FAIL` 时，该列才记 0
+流程：**回测成功后若 `tentative_submittable = 1`，runner 会立刻请求一次自相关**并把结论写进上面三列
+（平台若还在算，会返回空 body + `Retry-After`，客户端按它轮询；超时则留 NULL 待补算）。
 
-即：`其他检查全 PASS 且 SELF_CORRELATION != FAIL` → 1，否则 0。失败的回测（没有任何检查数据）记 0。
-
-需要更严格的完整判定（含自相关）时，直接查检查列：
+查真正可以提交的回测：
 
 ```sql
-SELECT s.alpha_uid, s.expression, d.braint_alpha_id
+SELECT s.alpha_uid, s.expression, s.self_correlation, d.braint_alpha_id
 FROM alpha_simulations AS s
 JOIN alpha_simulation_details AS d USING (sim_uid)
-WHERE s.completed = 1
-  AND s.check_low_sharpe = 'PASS'
-  AND s.check_low_fitness = 'PASS'
-  AND s.check_self_correlation = 'PASS';
+WHERE s.submittable = 'PASS'
+ORDER BY s.is_sharpe DESC;
 ```
 
-`PENDING`（如 `SELF_CORRELATION` 尚未算完）同样不算通过。
+历史数据补算（早期写入的行没有这三列，或当时超时未取到）：
+
+```powershell
+uv run python -m worldquant_consultant_project.simulation.self_correlation --dry-run   # 看有多少待补
+uv run python -m worldquant_consultant_project.simulation.self_correlation              # 补算并写回
+```
+
+- 扫描条件：`tentative_submittable = 1 AND submittable IS NULL AND completed = 1`
+- 该接口限流很紧：实测短时间连续请求会返回 `429 {"detail":"THROTTLED"}`（且不带 `Retry-After`），
+  所以默认单线程、每个因子之间 `--pause 1` 秒；遇到 429 按 5/10/20 秒退避重试几次，
+  **连续 5 个 429 就中止整轮**（剩余保持 NULL）
+- 被限流时过一段时间再执行同一条命令即可：只补 `submittable IS NULL` 的行，已测过的自动跳过
+- `--threshold` 可改通过线（默认 `0.7`）
 
 BRAIN 的轮询约定是「响应带 `Retry-After` 头即未完成」，客户端据此等待并兼容
 `{"progress": 0.x}` 的进度体。

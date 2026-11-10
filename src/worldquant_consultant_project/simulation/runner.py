@@ -51,6 +51,8 @@ class SimulationOutcome:
     factor_caused: bool = False
     # Set when a submission quota blocked the run ("daily" / "concurrent").
     limit_scope: str | None = None
+    # Largest self-correlation, measured only when the factor looked submittable.
+    self_correlation: float | None = None
 
     @property
     def ok(self) -> bool:
@@ -79,6 +81,7 @@ def run_simulation(
     credentials_path: Path | str | None = None,
     client: BrainSimulationClient | None = None,
     initialize_db: bool = True,
+    self_correlation_timeout: float = 60.0,
 ) -> SimulationOutcome:
     """Backtest one Fast Expression factor and store the run in SQLite.
 
@@ -148,6 +151,17 @@ def run_simulation(
         outcome.submittable = submittable
         outcome.submit_blockers = blockers
         outcome.status = "completed"
+        if storage.tentative_submittable(storage.check_values(alpha_body)) == 1:
+            # The checks say "submittable" only because SELF_CORRELATION is still PENDING;
+            # ask for the real number so the verdict can be recorded instead of guessed.
+            try:
+                outcome.self_correlation = client.get_self_correlation(
+                    outcome.alpha_id, timeout=self_correlation_timeout
+                )
+            except BrainSimulationError as exc:
+                logger.warning(
+                    "cannot read the self-correlation of %s: %s", outcome.alpha_id, exc
+                )
     except SimulationTimeout as exc:
         # The platform is still computing: keep the row as a placeholder without an error
         # so reconciliation can collect the result instead of losing it.
@@ -213,6 +227,7 @@ def run_simulation(
                 ),
                 simulation_body=simulation_body,
                 alpha_body=alpha_body,
+                self_correlation=outcome.self_correlation,
             )
         connection.close()
 

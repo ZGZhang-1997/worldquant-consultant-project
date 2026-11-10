@@ -266,6 +266,60 @@ class BrainSimulationClient:
             return body
         return last
 
+    def get_self_correlation(
+        self,
+        alpha_id: str,
+        *,
+        timeout: float = 60.0,
+        interval: float = 2.0,
+        max_rate_limit_retries: int = 3,
+    ) -> float | None:
+        """Largest self-correlation of an alpha, or ``None`` when it is not ready.
+
+        The platform computes it on demand: the first calls answer ``200`` with an empty
+        body plus ``Retry-After`` while the regression runs against the account's alphas.
+        The endpoint has a tight quota, so a 429 is waited out a few times (usually without
+        a ``Retry-After`` hint, hence the exponential fallback) and then given up on.
+        """
+        self.authenticate()
+        deadline = time.monotonic() + max(timeout, 0.0)
+        retries = 0
+        while True:
+            try:
+                response = self._get_with_auth_retry(
+                    f"{self.base_url}/alphas/{alpha_id}/correlations/self"
+                )
+            except BrainSimulationError as exc:
+                if exc.status_code != 429:
+                    raise
+                retries += 1
+                remaining = deadline - time.monotonic()
+                if remaining <= 0 or retries > max_rate_limit_retries:
+                    raise
+                wait = exc.retry_after or min(5.0 * (2 ** (retries - 1)), 60.0)
+                logger.info(
+                    "self-correlation rate limited for %s; waiting %.0fs (retry %d/%d)",
+                    alpha_id,
+                    min(wait, remaining),
+                    retries,
+                    max_rate_limit_retries,
+                )
+                time.sleep(min(wait, remaining))
+                continue
+
+            if response.text.strip():
+                payload = _json_or_empty(response)
+                maximum = payload.get("max")
+                if isinstance(maximum, bool) or not isinstance(maximum, (int, float)):
+                    return None
+                return float(maximum)
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return None
+            raw = response.headers.get("Retry-After")
+            wait = _poll_delay(raw) if raw else interval
+            time.sleep(min(wait, remaining))
+
     def simulation_snapshot(self, sim_id: str) -> dict[str, Any] | None:
         """One non-blocking look at a submitted simulation.
 

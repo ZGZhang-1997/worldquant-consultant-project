@@ -106,6 +106,9 @@ MAIN_COLUMNS: tuple[str, ...] = (
     "completed",
     "simulated_at",
     "duration_seconds",
+    "submittable",
+    "self_correlation",
+    "self_correlation_checked_at",
 ) + tuple(column for column, _, _ in IS_METRICS)
 
 DETAIL_COLUMNS: tuple[str, ...] = (
@@ -121,6 +124,18 @@ DETAIL_COLUMNS: tuple[str, ...] = (
     "checks_json",
     "raw_simulation_json",
     "raw_alpha_json",
+)
+
+#: Self-correlation above this value would block submission (BRAIN's usual limit).
+SELF_CORRELATION_LIMIT = 0.7
+#: ``submittable`` values: the real verdict once self-correlation has been measured.
+SUBMITTABLE_PASS = "PASS"
+SUBMITTABLE_FAIL = "FAIL"
+#: Extra main-table columns that depend on a separate self-correlation request.
+SELF_CORRELATION_COLUMNS: tuple[tuple[str, str], ...] = (
+    ("submittable", "TEXT"),
+    ("self_correlation", "REAL"),
+    ("self_correlation_checked_at", "TEXT"),
 )
 
 #: ``error_kind`` values. Only ``factor`` errors mean the alpha was really evaluated.
@@ -306,6 +321,9 @@ CREATE TABLE IF NOT EXISTS {table} (
     completed        INTEGER NOT NULL DEFAULT 0,
     simulated_at     TEXT NOT NULL,
     duration_seconds REAL,
+    submittable      TEXT,
+    self_correlation REAL,
+    self_correlation_checked_at TEXT,
     {metric_columns},
     FOREIGN KEY (alpha_uid) REFERENCES alphas (alpha_uid) ON DELETE CASCADE
 );
@@ -465,6 +483,7 @@ def connect(path: Path | str | None = None, *, initialize: bool = True) -> sqlit
     connection.executescript(_tables())
     ensure_alphas_layout(connection)
     connection.executescript(_INDEXES_AND_VIEW)
+    _ensure_simulation_columns(connection)
     _ensure_error_kind(connection)
     if _refresh_tentative(connection):
         refresh_all_alpha_metrics(connection)
@@ -511,6 +530,31 @@ def _migrate_alphas_layout(connection: sqlite3.Connection) -> int:
     finally:
         connection.execute("PRAGMA foreign_keys = ON")
     return dropped
+
+
+def submittable_from(
+    self_correlation: float | None, *, limit: float = SELF_CORRELATION_LIMIT
+) -> str | None:
+    """``PASS`` when the measured self-correlation is below the limit, else ``FAIL``."""
+    if self_correlation is None:
+        return None
+    return SUBMITTABLE_PASS if self_correlation < limit else SUBMITTABLE_FAIL
+
+
+def _ensure_simulation_columns(connection: sqlite3.Connection) -> int:
+    """Add the self-correlation columns to a database created before they existed."""
+    existing = {
+        row["name"] for row in connection.execute(f"PRAGMA table_info({SIMULATIONS_TABLE})")
+    }
+    added = 0
+    for name, kind in SELF_CORRELATION_COLUMNS:
+        if name in existing:
+            continue
+        connection.execute(f"ALTER TABLE {SIMULATIONS_TABLE} ADD COLUMN {name} {kind}")
+        added += 1
+    if added:
+        connection.commit()
+    return added
 
 
 def _ensure_error_kind(connection: sqlite3.Connection) -> int:
@@ -764,6 +808,8 @@ def build_rows(
     finished_at: str | None = None,
     simulation_body: Mapping[str, Any] | None = None,
     alpha_body: Mapping[str, Any] | None = None,
+    self_correlation: float | None = None,
+    self_correlation_limit: float = SELF_CORRELATION_LIMIT,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Build the simulation row and its side-table row for one backtest."""
     block = _is_block(alpha_body)
@@ -777,6 +823,9 @@ def build_rows(
         "completed": 1 if completed else 0,
         "simulated_at": simulated_at,
         "duration_seconds": duration_seconds,
+        "self_correlation": self_correlation,
+        "submittable": submittable_from(self_correlation, limit=self_correlation_limit),
+        "self_correlation_checked_at": utc_now() if self_correlation is not None else None,
     }
     for column, source, _ in IS_METRICS:
         value = block.get(source)
