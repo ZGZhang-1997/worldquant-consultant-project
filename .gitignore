@@ -10,10 +10,14 @@ wheels/
 .venv/
 venv/
 
-# Local secrets
+# Local secrets — never commit these
 .env
 .env.*
 credentials.json
 
-# Local data catalogue, exports and crawl logs
-data/
+# Nothing under data/ is generated build output: the SQLite catalogues are tracked on
+# purpose (see README), but transient SQLite side files must never be committed.
+data/**/*-wal
+data/**/*-shm
+data/**/*.bak
+data/**/*.tmp

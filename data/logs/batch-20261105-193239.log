@@ -1,0 +1,6 @@
+2026-11-05 19:32:39,491 INFO    MainThread simulation.batch: logging to C:\Users\25293\Desktop\worldquant consultant project\data\logs\batch-20261105-193239.log
+2026-11-05 19:32:39,511 INFO    MainThread simulation.batch: settings: {'instrumentType': 'EQUITY', 'region': 'USA', 'universe': 'TOP3000', 'delay': 1, 'decay': 3, 'neutralization': 'SUBINDUSTRY', 'truncation': 0.08, 'pasteurization': 'ON', 'unitHandling': 'VERIFY', 'nanHandling': 'OFF', 'language': 'FASTEXPR', 'visualization': False} | workers=3 | pending=7660 | db=C:\Users\25293\Desktop\worldquant consultant project\data\simulations.db
+2026-11-05 19:32:39,527 INFO    MainThread simulation.batch: reconciling 2 row(s) left by an interrupted run
+2026-11-05 19:32:41,036 INFO    MainThread simulation.batch: 322a9620f63543ffb65834e57e3eae6e: still running on the platform (age 223 min, limit 360 min), left for the next pass
+2026-11-05 19:32:41,358 INFO    MainThread simulation.batch: f0ef1acb29d24a12911a788dba81aa2f: still running on the platform (age 199 min, limit 360 min), left for the next pass
+2026-11-05 19:32:41,359 INFO    MainThread simulation.batch: reconcile done: checked=2 recovered=0 failed=0 missing=0 running=2 abandoned=0

@@ -1,0 +1,10 @@
+2026-11-05 19:16:52,928 INFO    MainThread simulation.batch: logging to C:\Users\25293\Desktop\worldquant consultant project\data\logs\batch-20261105-191652.log
+2026-11-05 19:16:52,964 INFO    MainThread simulation.batch: settings: {'instrumentType': 'EQUITY', 'region': 'USA', 'universe': 'TOP3000', 'delay': 1, 'decay': 3, 'neutralization': 'SUBINDUSTRY', 'truncation': 0.08, 'pasteurization': 'ON', 'unitHandling': 'VERIFY', 'nanHandling': 'OFF', 'language': 'FASTEXPR', 'visualization': False} | workers=3 | pending=7664 | db=C:\Users\25293\Desktop\worldquant consultant project\data\simulations.db
+2026-11-05 19:16:52,986 INFO    MainThread simulation.batch: reconciling 6 row(s) left by an interrupted run
+2026-11-05 19:16:54,793 INFO    MainThread simulation.batch: f0ef1acb29d24a12911a788dba81aa2f: still running on the platform, left for the next pass
+2026-11-05 19:16:55,526 INFO    MainThread simulation.batch: ada2af555fff43608bcd8a387e914054: recovered result for alpha GrWQod85
+2026-11-05 19:16:55,854 INFO    MainThread simulation.batch: 757853e6f8944dc8b3d1ed5091ef504d: platform reported ERROR
+2026-11-05 19:16:56,553 INFO    MainThread simulation.batch: 5030f4e57b3f42f79d6cc6917e20b6be: recovered result for alpha npv6v5GM
+2026-11-05 19:16:57,238 INFO    MainThread simulation.batch: 7905bdb8bfa549df87056070ff4d5772: recovered result for alpha VkxMxQnY
+2026-11-05 19:16:57,945 INFO    MainThread simulation.batch: 4a9969f40d7944b6983d5b2a907940d0: recovered result for alpha 58EGEK5k
+2026-11-05 19:16:57,946 INFO    MainThread simulation.batch: reconcile done: checked=6 recovered=4 failed=1 missing=0 running=1

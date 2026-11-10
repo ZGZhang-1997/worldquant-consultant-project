@@ -1,0 +1,2 @@
+2026-11-03 17:16:37,538 INFO    labeling: logging to C:\Users\25293\Desktop\worldquant consultant project\data\logs\label-20261103-171637.log
+2026-11-03 17:16:37,601 INFO    labeling: provider=gemini model=gemini-3.8-flash workers=8 thinking=False pending=0 prompt_sha=a088d1ae9d35

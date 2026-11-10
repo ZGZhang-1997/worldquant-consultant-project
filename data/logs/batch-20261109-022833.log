@@ -1,0 +1,47 @@
+2026-11-09 02:28:33,043 INFO    MainThread simulation.batch: logging to C:\Users\25293\Desktop\worldquant consultant project\data\logs\batch-20261109-022833.log
+2026-11-09 02:28:33,068 INFO    MainThread simulation.batch: settings: {'instrumentType': 'EQUITY', 'region': 'USA', 'universe': 'TOP3000', 'delay': 1, 'decay': 3, 'neutralization': 'SUBINDUSTRY', 'truncation': 0.08, 'pasteurization': 'ON', 'unitHandling': 'VERIFY', 'nanHandling': 'OFF', 'language': 'FASTEXPR', 'visualization': False} | workers=3 | pending=5162 | db=C:\Users\25293\Desktop\worldquant consultant project\data\alpha.db
+2026-11-09 02:28:33,099 INFO    MainThread simulation.batch: reconciling 4 row(s) left by an interrupted run
+2026-11-09 02:28:34,759 INFO    MainThread simulation.batch: 65ff85e9429643fba78027d65ed66e02: id unknown to the platform, marked interrupted
+2026-11-09 02:28:35,103 INFO    MainThread simulation.batch: fbf625f763934df98016e7f45b936269: id unknown to the platform, marked interrupted
+2026-11-09 02:28:35,446 INFO    MainThread simulation.batch: 9f28dabfd09f4cdab16d6095e246a16f: id unknown to the platform, marked interrupted
+2026-11-09 02:28:35,785 INFO    MainThread simulation.batch: 7e25bdb8e61a4705a78bf7ee31ebd2e0: id unknown to the platform, marked interrupted
+2026-11-09 02:28:35,785 INFO    MainThread simulation.batch: reconcile done: checked=4 recovered=0 failed=0 missing=4 running=0 abandoned=0
+2026-11-09 02:28:35,792 INFO    MainThread simulation.batch: 4 alpha(s) stay retryable (no verdict from the platform)
+2026-11-09 02:28:37,099 INFO    ThreadPoolExecutor-0_1 worldquant_consultant_project.simulation.client: simulation submitted: https://api.worldquantbrain.com/simulations/47s66g9Ay4ke9hzYPRLXMje
+2026-11-09 02:28:37,102 INFO    ThreadPoolExecutor-0_2 worldquant_consultant_project.simulation.client: simulation submitted: https://api.worldquantbrain.com/simulations/2wdoyd6w45ed9eX15wfHBfxn
+2026-11-09 02:28:37,130 INFO    ThreadPoolExecutor-0_0 worldquant_consultant_project.simulation.client: simulation submitted: https://api.worldquantbrain.com/simulations/2rbTAO7Lg4VCcuVbrHgpNSX
+2026-11-09 02:28:37,387 INFO    ThreadPoolExecutor-0_2 worldquant_consultant_project.simulation.client: simulation progress: 10%
+2026-11-09 02:28:37,389 INFO    ThreadPoolExecutor-0_1 worldquant_consultant_project.simulation.client: simulation progress: 10%
+2026-11-09 02:28:37,417 INFO    ThreadPoolExecutor-0_0 worldquant_consultant_project.simulation.client: simulation progress: 10%
+2026-11-09 02:28:53,260 INFO    ThreadPoolExecutor-0_1 worldquant_consultant_project.simulation.client: simulation progress: 15%
+2026-11-09 02:28:58,524 INFO    ThreadPoolExecutor-0_2 worldquant_consultant_project.simulation.client: simulation progress: 15%
+2026-11-09 02:28:58,550 INFO    ThreadPoolExecutor-0_1 worldquant_consultant_project.simulation.client: simulation progress: 35%
+2026-11-09 02:28:58,552 INFO    ThreadPoolExecutor-0_0 worldquant_consultant_project.simulation.client: simulation progress: 15%
+2026-11-09 02:29:14,434 INFO    ThreadPoolExecutor-0_0 worldquant_consultant_project.simulation.client: simulation progress: 35%
+2026-11-09 02:29:24,958 INFO    ThreadPoolExecutor-0_2 worldquant_consultant_project.simulation.client: simulation progress: 35%
+2026-11-09 02:30:02,472 INFO    ThreadPoolExecutor-0_1 worldquant_consultant_project.simulation.runner: simulation 53a8d6fee375413092265f13180e8da4 completed in 86.6s (alpha akK8Yz29)
+2026-11-09 02:30:02,822 INFO    ThreadPoolExecutor-0_1 worldquant_consultant_project.simulation.client: simulation submitted: https://api.worldquantbrain.com/simulations/4yp0ff5Pm4zLaUb2trtAfFh
+2026-11-09 02:30:03,117 INFO    ThreadPoolExecutor-0_1 worldquant_consultant_project.simulation.client: simulation progress: 10%
+2026-11-09 02:30:07,933 INFO    ThreadPoolExecutor-0_0 worldquant_consultant_project.simulation.runner: simulation 2195128dc2df49ae9ae49e74296cc881 completed in 92.1s (alpha 9qxeXzOd)
+2026-11-09 02:30:08,274 INFO    ThreadPoolExecutor-0_0 worldquant_consultant_project.simulation.client: simulation submitted: https://api.worldquantbrain.com/simulations/3SsUUG3s94sC90byJscMwnC
+2026-11-09 02:30:08,553 INFO    ThreadPoolExecutor-0_0 worldquant_consultant_project.simulation.client: simulation progress: 10%
+2026-11-09 02:30:18,539 INFO    ThreadPoolExecutor-0_2 worldquant_consultant_project.simulation.runner: simulation f7a909730b134378b689622b77ec3c4d completed in 102.7s (alpha A1V5WexE)
+2026-11-09 02:30:18,884 INFO    ThreadPoolExecutor-0_2 worldquant_consultant_project.simulation.client: simulation submitted: https://api.worldquantbrain.com/simulations/3zyMVUfsR4ZkbVNpaWtqAKL
+2026-11-09 02:30:19,169 INFO    ThreadPoolExecutor-0_2 worldquant_consultant_project.simulation.client: simulation progress: 10%
+2026-11-09 02:30:24,265 INFO    ThreadPoolExecutor-0_1 worldquant_consultant_project.simulation.client: simulation progress: 15%
+2026-11-09 02:30:24,434 INFO    ThreadPoolExecutor-0_0 worldquant_consultant_project.simulation.client: simulation progress: 15%
+2026-11-09 02:30:29,720 INFO    ThreadPoolExecutor-0_0 worldquant_consultant_project.simulation.client: simulation progress: 35%
+2026-11-09 02:30:34,914 INFO    ThreadPoolExecutor-0_1 worldquant_consultant_project.simulation.client: simulation progress: 35%
+2026-11-09 02:30:56,168 INFO    ThreadPoolExecutor-0_2 worldquant_consultant_project.simulation.client: simulation progress: 15%
+2026-11-09 02:31:06,756 INFO    ThreadPoolExecutor-0_2 worldquant_consultant_project.simulation.client: simulation progress: 35%
+2026-11-09 02:31:28,311 INFO    ThreadPoolExecutor-0_0 worldquant_consultant_project.simulation.runner: simulation 96abbeefb3c94f579e578cba3f3096d6 completed in 80.4s (alpha d5WMjLkX)
+2026-11-09 02:31:28,689 INFO    ThreadPoolExecutor-0_0 worldquant_consultant_project.simulation.client: simulation submitted: https://api.worldquantbrain.com/simulations/4ofxeq7I64XfbAN1a9D41AeG
+2026-11-09 02:31:28,978 INFO    ThreadPoolExecutor-0_0 worldquant_consultant_project.simulation.client: simulation progress: 10%
+2026-11-09 02:31:38,848 INFO    ThreadPoolExecutor-0_1 worldquant_consultant_project.simulation.runner: simulation 86d4c0ae3c65429b8afb96814ca7245f completed in 96.4s (alpha 6XdQ8Jrp)
+2026-11-09 02:31:39,182 INFO    ThreadPoolExecutor-0_1 worldquant_consultant_project.simulation.client: simulation submitted: https://api.worldquantbrain.com/simulations/PCEaN92y5j3aWHLHJNuhTA
+2026-11-09 02:31:39,604 INFO    ThreadPoolExecutor-0_1 worldquant_consultant_project.simulation.client: simulation progress: 10%
+2026-11-09 02:32:05,301 INFO    ThreadPoolExecutor-0_2 worldquant_consultant_project.simulation.runner: simulation a4919ac70620444ea1c59b1c952a442e completed in 106.8s (alpha Xg937qz5)
+2026-11-09 02:32:05,636 INFO    ThreadPoolExecutor-0_2 worldquant_consultant_project.simulation.client: simulation submitted: https://api.worldquantbrain.com/simulations/3IQ7uOfhH55Yb5o1aUFMzmWr
+2026-11-09 02:32:05,918 INFO    ThreadPoolExecutor-0_2 worldquant_consultant_project.simulation.client: simulation progress: 10%
+2026-11-09 02:32:05,993 INFO    ThreadPoolExecutor-0_0 worldquant_consultant_project.simulation.client: simulation progress: 15%
+2026-11-09 02:32:06,038 INFO    ThreadPoolExecutor-0_1 worldquant_consultant_project.simulation.client: simulation progress: 15%

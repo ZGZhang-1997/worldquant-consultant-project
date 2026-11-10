@@ -1,0 +1,3 @@
+2026-11-09 03:49:40,367 INFO    acquisition.active_alphas: logging to C:\Users\25293\Desktop\worldquant consultant project\data\logs\active-alphas-20261109-034940.log
+2026-11-09 03:49:41,495 INFO    worldquant_consultant_project.acquisition.client: authenticated with BRAIN API as z*********************m
+2026-11-09 03:49:42,247 INFO    acquisition.active_alphas: active alphas synced: fetched=7 upserted=7 new factors=6 skipped=0 total=7

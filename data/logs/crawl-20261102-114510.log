@@ -1,0 +1,7 @@
+﻿2026-11-02 11:45:10,637 INFO    acquisition: logging to C:\Users\25293\Desktop\worldquant consultant project\data\logs\crawl-20261102-114510.log
+2026-11-02 11:45:10,638 INFO    acquisition: scope instrument=EQUITY region=USA delay=1 universes=TOP3000 max_fields=60 db=data\brain_smoke.db
+2026-11-02 11:45:11,667 INFO    worldquant_consultant_project.acquisition.client: authenticated with BRAIN API as z***@***
+2026-11-02 11:45:12,342 INFO    worldquant_consultant_project.acquisition.crawl: universe TOP3000 valid (14 data sets)
+2026-11-02 11:45:13,012 INFO    worldquant_consultant_project.acquisition.crawl: universe TOP3000: stored 14/14 data sets
+2026-11-02 11:45:13,012 INFO    worldquant_consultant_project.acquisition.crawl: universe TOP3000: 0 data sets to crawl
+2026-11-02 11:45:13,039 INFO    acquisition: done: universes valid=1 invalid=0, data sets done=0 failed=0, fields stored=0

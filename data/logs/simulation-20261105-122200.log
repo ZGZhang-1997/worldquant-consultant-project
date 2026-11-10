@@ -1,0 +1,4 @@
+2026-11-05 12:22:00,091 INFO    simulation: logging to C:\Users\25293\Desktop\worldquant consultant project\data\logs\simulation-20261105-122200.log
+2026-11-05 12:22:01,552 INFO    worldquant_consultant_project.simulation.client: simulation submitted: https://api.worldquantbrain.com/simulations/jNm3U2nx4Yoaw0nn54Ihb8
+2026-11-05 12:22:01,826 INFO    worldquant_consultant_project.simulation.client: simulation progress: 10%
+2026-11-05 12:22:22,892 ERROR   worldquant_consultant_project.simulation.runner: simulation failed for 'rank(ts_zscore(close, 20)': Unexpected end of input. <linkToCommonErrorMessages>Learn more</linkToCommonErrorMessages> (line 1, start 24)

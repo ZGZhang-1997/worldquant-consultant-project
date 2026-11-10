@@ -1,0 +1,8 @@
+2026-11-05 13:52:35,672 INFO    MainThread simulation.batch: logging to C:\Users\25293\Desktop\worldquant consultant project\data\logs\batch-20261105-135235.log
+2026-11-05 13:52:35,688 INFO    MainThread simulation.batch: settings: {'instrumentType': 'EQUITY', 'region': 'USA', 'universe': 'TOP3000', 'delay': 1, 'decay': 4, 'neutralization': 'SUBINDUSTRY', 'truncation': 0.08, 'pasteurization': 'ON', 'unitHandling': 'VERIFY', 'nanHandling': 'OFF', 'language': 'FASTEXPR', 'visualization': False} | workers=3 | pending=1 | db=C:\Users\25293\Desktop\worldquant consultant project\data\simulations.db
+2026-11-05 13:52:36,979 INFO    ThreadPoolExecutor-0_0 worldquant_consultant_project.simulation.client: simulation submitted: https://api.worldquantbrain.com/simulations/1FUOdn5Ij50pcmXrdkhyJQn
+2026-11-05 13:52:37,252 INFO    ThreadPoolExecutor-0_0 worldquant_consultant_project.simulation.client: simulation progress: 10%
+2026-11-05 13:53:08,881 INFO    ThreadPoolExecutor-0_0 worldquant_consultant_project.simulation.client: simulation progress: 15%
+2026-11-05 13:53:14,157 INFO    ThreadPoolExecutor-0_0 worldquant_consultant_project.simulation.client: simulation progress: 35%
+2026-11-05 13:54:18,627 INFO    ThreadPoolExecutor-0_0 worldquant_consultant_project.simulation.runner: simulation 8db2b9cb49934bb697fc5f275ec23831 completed in 102.9s (alpha ZYQXwqO1)
+2026-11-05 13:54:18,634 INFO    MainThread simulation.batch: progress 1/1  ok=1 failed=0  0.58/min  eta 0 min

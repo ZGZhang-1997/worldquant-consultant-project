@@ -1,0 +1,8 @@
+2026-11-05 11:54:54,864 INFO    alpha_generate: logging to C:\Users\25293\Desktop\worldquant consultant project\data\logs\alpha-generate-20261105-115454.log
+2026-11-05 11:54:54,868 INFO    alpha_generate: label source: union:deepseek,gemini
+2026-11-05 11:54:54,964 INFO    worldquant_consultant_project.Template_based_alpha_generate.generator: T01_Relative_Valuation: Slot_Numerator=233 Slot_Denominator=11 -> 2563 combinations
+2026-11-05 11:54:55,125 INFO    worldquant_consultant_project.Template_based_alpha_generate.generator: T02_Fundamental_Acceleration: Slot_Target=175 Slot_Scale=26 -> 4550 combinations
+2026-11-05 11:54:55,241 INFO    worldquant_consultant_project.Template_based_alpha_generate.generator: T03_Volume_Price_Divergence: Slot_Price=158 Slot_Activity=140 -> 22120 combinations
+2026-11-05 11:54:55,399 INFO    worldquant_consultant_project.Template_based_alpha_generate.generator: T04_Analyst_Revision_Drift: Slot_Expectation=223 -> 223 combinations
+2026-11-05 11:54:55,452 INFO    worldquant_consultant_project.Template_based_alpha_generate.generator: T05_Sentiment_Alternative_Shock: Slot_Sentiment=224 -> 224 combinations
+2026-11-05 11:54:57,386 INFO    alpha_generate: run ed9c88a6a7434748895bd627fed0b19e: inserted 29680 alphas, skipped 0 already present

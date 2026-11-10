@@ -1,0 +1,4 @@
+2026-11-09 03:24:08,828 INFO    MainThread simulation.optimize: logging to data\logs\optimize-20261109-032408.log
+2026-11-09 03:24:08,846 INFO    MainThread simulation.optimize: delay1 | sharpe>=1.25 fitness>=0.9 | factors=1 | combinations=30 | runs=21 (already decided=9)
+2026-11-09 03:24:08,862 INFO    MainThread simulation.optimize: delay0 | sharpe>=2 fitness>=1.2 | factors=1 | combinations=30 | runs=30 (already decided=0)
+2026-11-09 03:24:08,862 INFO    MainThread simulation.optimize: workers=3 | db=_tmp_both.db

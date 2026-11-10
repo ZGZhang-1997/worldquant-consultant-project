@@ -1,0 +1,5 @@
+﻿2026-11-02 11:44:29,906 INFO    acquisition: logging to C:\Users\25293\Desktop\worldquant consultant project\data\logs\crawl-20261102-114429.log
+2026-11-02 11:44:29,907 INFO    acquisition: scope instrument=EQUITY region=USA delay=1 universes=TOP3000 max_fields=None db=C:\Users\25293\Desktop\worldquant consultant project\data\brain.db
+2026-11-02 11:44:31,249 INFO    worldquant_consultant_project.acquisition.client: authenticated with BRAIN API as z***@***
+2026-11-02 11:44:32,760 INFO    acquisition: dry-run TOP3000: {'datasets': 14}
+2026-11-02 11:44:32,760 INFO    acquisition: dry-run sample_dataset: {'id': 'analyst4', 'name': 'Analyst Estimate Data for Equity', 'fields': 1324, 'sample_field': 'actual_cashflow_per_share_value_quarterly'}

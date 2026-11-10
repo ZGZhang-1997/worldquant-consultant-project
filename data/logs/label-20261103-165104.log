@@ -1,0 +1,2 @@
+2026-11-03 16:51:04,099 INFO    labeling: logging to C:\Users\25293\Desktop\worldquant consultant project\data\logs\label-20261103-165104.log
+2026-11-03 16:51:04,174 INFO    labeling: provider=deepseek model=deepseek-flash workers=8 thinking=False pending=0 prompt_sha=a088d1ae9d35

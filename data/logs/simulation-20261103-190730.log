@@ -1,0 +1,4 @@
+2026-11-03 19:07:30,282 INFO    simulation: logging to C:\Users\25293\Desktop\worldquant consultant project\data\logs\simulation-20261103-190730.log
+2026-11-03 19:07:32,117 INFO    worldquant_consultant_project.simulation.client: simulation submitted: https://api.worldquantbrain.com/simulations/uonKxda95cgco7tACHUrWM
+2026-11-03 19:07:32,437 INFO    worldquant_consultant_project.simulation.client: simulation progress: 10%
+2026-11-03 19:07:48,400 ERROR   worldquant_consultant_project.simulation.runner: simulation failed for 'rank(ts_delta(close, 5)': Unexpected end of input. <linkToCommonErrorMessages>Learn more</linkToCommonErrorMessages> (line 1, start 22)

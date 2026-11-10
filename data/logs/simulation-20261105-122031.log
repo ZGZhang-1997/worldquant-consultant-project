@@ -1,0 +1,6 @@
+2026-11-05 12:20:31,927 INFO    simulation: logging to C:\Users\25293\Desktop\worldquant consultant project\data\logs\simulation-20261105-122031.log
+2026-11-05 12:20:33,479 INFO    worldquant_consultant_project.simulation.client: simulation submitted: https://api.worldquantbrain.com/simulations/3BDfmNfON4k89mzZ0dQa5Gw
+2026-11-05 12:20:33,743 INFO    worldquant_consultant_project.simulation.client: simulation progress: 10%
+2026-11-05 12:20:44,271 INFO    worldquant_consultant_project.simulation.client: simulation progress: 15%
+2026-11-05 12:20:54,791 INFO    worldquant_consultant_project.simulation.client: simulation progress: 35%
+2026-11-05 12:21:53,049 INFO    worldquant_consultant_project.simulation.runner: simulation 3d3ed67c38964d9683e79b568ea02680 completed in 79.9s (alpha QPvWkJ1X)

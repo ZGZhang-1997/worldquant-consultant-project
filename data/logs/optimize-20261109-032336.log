@@ -1,0 +1,4 @@
+2026-11-09 03:23:36,712 INFO    MainThread simulation.optimize: logging to C:\Users\25293\Desktop\worldquant consultant project\data\logs\optimize-20261109-032336.log
+2026-11-09 03:23:36,782 INFO    MainThread simulation.optimize: delay1 | sharpe>=1.25 fitness>=0.9 | factors=102 | combinations=30 | runs=2950 (already decided=110)
+2026-11-09 03:23:36,802 INFO    MainThread simulation.optimize: delay0 | sharpe>=2 fitness>=1.2 | factors=0 | combinations=30 | runs=0 (already decided=0)
+2026-11-09 03:23:36,802 INFO    MainThread simulation.optimize: workers=3 | db=C:\Users\25293\Desktop\worldquant consultant project\data\alpha.db

@@ -1,0 +1,3 @@
+2026-11-03 16:51:07,003 INFO    labeling: logging to C:\Users\25293\Desktop\worldquant consultant project\data\logs\label-20261103-165107.log
+2026-11-03 16:51:07,018 INFO    labeling: added columns: gemini_category, gemini_math_dimension, gemini_polarity, gemini_domain_support, gemini_frequency
+2026-11-03 16:51:07,093 INFO    labeling: provider=gemini model=gemini-3.8-flash workers=8 thinking=False pending=4367 prompt_sha=a088d1ae9d35

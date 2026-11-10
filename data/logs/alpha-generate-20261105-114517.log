@@ -1,0 +1,14 @@
+2026-11-05 11:45:17,426 INFO    alpha_generate: logging to C:\Users\25293\Desktop\worldquant consultant project\data\logs\alpha-generate-20261105-114517.log
+2026-11-05 11:45:17,431 INFO    alpha_generate: label source: deepseek:deepseek
+2026-11-05 11:45:17,480 INFO    worldquant_consultant_project.Template_based_alpha_generate.generator: T01_Relative_Valuation: Slot_Numerator=199 Slot_Denominator=5 -> 995 combinations
+2026-11-05 11:45:17,537 INFO    worldquant_consultant_project.Template_based_alpha_generate.generator: T02_Fundamental_Acceleration: Slot_Target=151 Slot_Scale=13 -> 1963 combinations
+2026-11-05 11:45:17,598 INFO    worldquant_consultant_project.Template_based_alpha_generate.generator: T03_Volume_Price_Divergence: Slot_Price=79 Slot_Activity=70 -> 5530 combinations
+2026-11-05 11:45:17,653 INFO    worldquant_consultant_project.Template_based_alpha_generate.generator: T04_Analyst_Revision_Drift: Slot_Expectation=174 -> 174 combinations
+2026-11-05 11:45:17,683 INFO    worldquant_consultant_project.Template_based_alpha_generate.generator: T05_Sentiment_Alternative_Shock: Slot_Sentiment=91 -> 91 combinations
+2026-11-05 11:45:17,905 INFO    alpha_generate: logging to C:\Users\25293\Desktop\worldquant consultant project\data\logs\alpha-generate-20261105-114517.log
+2026-11-05 11:45:17,909 INFO    alpha_generate: label source: intersection:deepseek,gemini
+2026-11-05 11:45:18,008 INFO    worldquant_consultant_project.Template_based_alpha_generate.generator: T01_Relative_Valuation: Slot_Numerator=152 Slot_Denominator=5 -> 760 combinations
+2026-11-05 11:45:18,116 INFO    worldquant_consultant_project.Template_based_alpha_generate.generator: T02_Fundamental_Acceleration: Slot_Target=123 Slot_Scale=10 -> 1230 combinations
+2026-11-05 11:45:18,217 INFO    worldquant_consultant_project.Template_based_alpha_generate.generator: T03_Volume_Price_Divergence: Slot_Price=79 Slot_Activity=67 -> 5293 combinations
+2026-11-05 11:45:18,296 INFO    worldquant_consultant_project.Template_based_alpha_generate.generator: T04_Analyst_Revision_Drift: Slot_Expectation=137 -> 137 combinations
+2026-11-05 11:45:18,356 INFO    worldquant_consultant_project.Template_based_alpha_generate.generator: T05_Sentiment_Alternative_Shock: Slot_Sentiment=76 -> 76 combinations

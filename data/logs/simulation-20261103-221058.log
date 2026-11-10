@@ -1,0 +1,14 @@
+2026-11-03 22:10:58,432 INFO    simulation: logging to C:\Users\25293\Desktop\worldquant consultant project\data\logs\simulation-20261103-221058.log
+2026-11-03 22:11:00,015 INFO    worldquant_consultant_project.simulation.client: simulation submitted: https://api.worldquantbrain.com/simulations/1FfamSaG44yv9cGOe9CCYz0
+2026-11-03 22:11:00,294 INFO    worldquant_consultant_project.simulation.client: simulation progress: 10%
+2026-11-03 22:11:37,258 INFO    worldquant_consultant_project.simulation.client: simulation progress: 15%
+2026-11-03 22:11:42,841 INFO    worldquant_consultant_project.simulation.client: simulation progress: 35%
+2026-11-03 22:12:41,445 ERROR   worldquant_consultant_project.simulation.runner: unexpected error during simulation
+Traceback (most recent call last):
+  File "C:\Users\25293\Desktop\worldquant consultant project\src\worldquant_consultant_project\simulation\runner.py", line 131, in run_simulation
+    outcome.metrics = _extract_metrics(alpha_body)
+                      ~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+  File "C:\Users\25293\Desktop\worldquant consultant project\src\worldquant_consultant_project\simulation\runner.py", line 55, in _extract_metrics
+    for sample, key in storage.SAMPLES:
+        ^^^^^^^^^^^
+ValueError: too many values to unpack (expected 2)

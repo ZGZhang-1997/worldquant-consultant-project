@@ -1,0 +1,10 @@
+2026-11-03 16:53:11,658 INFO    labeling: logging to C:\Users\25293\Desktop\worldquant consultant project\data\logs\label-20261103-165311.log
+2026-11-03 16:53:11,743 INFO    labeling: provider=gemini model=gemini-3.8-flash workers=8 thinking=False pending=4297 prompt_sha=a088d1ae9d35
+2026-11-03 17:05:14,536 WARNING worldquant_consultant_project.labeling.gemini_client: connection error; retrying in 2.0s (1/5)
+2026-11-03 17:09:21,578 WARNING worldquant_consultant_project.labeling.label: news12/low_price_deviation_std_1555 invalid attempt 1: 输出不是合法 JSON: Unterminated string starting at: line 4 column 15 (char 91)
+2026-11-03 17:09:55,907 WARNING worldquant_consultant_project.labeling.label: news12/min_minutes_to_one_pct_move invalid attempt 1: 输出不是合法 JSON: Expecting value: line 4 column 14 (char 90)
+2026-11-03 17:11:18,203 WARNING worldquant_consultant_project.labeling.label: news12/nws12_afterhsz_atrratio invalid attempt 1: 输出不是合法 JSON: Unterminated string starting at: line 4 column 3 (char 74)
+2026-11-03 17:13:37,734 WARNING worldquant_consultant_project.labeling.label: news12/thirty_day_moving_average_volume_2 invalid attempt 1: 输出不是合法 JSON: Expecting property name enclosed in double quotes: line 3 column 39 (char 70)
+2026-11-03 17:13:49,218 WARNING worldquant_consultant_project.labeling.label: news12/trading_volume_standard_deviation_3 invalid attempt 1: 输出不是合法 JSON: Expecting value: line 4 column 14 (char 86)
+2026-11-03 17:13:55,152 WARNING worldquant_consultant_project.labeling.label: news12/vwap_from_news_to_session_end invalid attempt 1: 输出不是合法 JSON: Expecting property name enclosed in double quotes: line 3 column 35 (char 66)
+2026-11-03 17:16:24,276 INFO    labeling: done: ok=4297 invalid=0 error=0 tokens_in=5415510 tokens_out=242330

@@ -1,0 +1,2 @@
+2026-11-05 11:44:55,665 INFO    alpha_generate: logging to C:\Users\25293\Desktop\worldquant consultant project\data\logs\alpha-generate-20261105-114455.log
+2026-11-05 11:44:55,667 ERROR   alpha_generate: T02_Fundamental_Acceleration: formula_pattern repeats a placeholder

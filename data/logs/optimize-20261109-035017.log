@@ -1,0 +1,6 @@
+2026-11-09 03:50:17,200 INFO    MainThread simulation.optimize: logging to C:\Users\25293\Desktop\worldquant consultant project\data\logs\optimize-20261109-035017.log
+2026-11-09 03:50:18,166 INFO    MainThread worldquant_consultant_project.acquisition.client: authenticated with BRAIN API as z*********************m
+2026-11-09 03:50:18,794 INFO    MainThread acquisition.active_alphas: active alphas synced: fetched=7 upserted=7 new factors=0 skipped=0 total=7
+2026-11-09 03:50:18,794 INFO    MainThread simulation.optimize: active alphas: fetched=7, new factors=0, rows=7
+2026-11-09 03:50:18,810 INFO    MainThread simulation.optimize: delay1 | sharpe>=1.25 fitness>=0.9 | factors=1 | combinations=30 | runs=21 (already decided=9)
+2026-11-09 03:50:18,811 INFO    MainThread simulation.optimize: workers=3 | db=C:\Users\25293\Desktop\worldquant consultant project\data\alpha.db

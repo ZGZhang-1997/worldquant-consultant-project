@@ -1,0 +1,3 @@
+2026-11-05 16:24:18,172 INFO    MainThread simulation.batch: logging to C:\Users\25293\Desktop\worldquant consultant project\data\logs\batch-20261105-162418.log
+2026-11-05 16:24:18,373 INFO    MainThread simulation.batch: skipped 21798 alphas referencing 1387 VECTOR (event) fields; BRAIN rejects them with ts_*/divide operators
+2026-11-05 16:24:18,374 INFO    MainThread simulation.batch: settings: {'instrumentType': 'EQUITY', 'region': 'USA', 'universe': 'TOP3000', 'delay': 1, 'decay': 3, 'neutralization': 'SUBINDUSTRY', 'truncation': 0.08, 'pasteurization': 'ON', 'unitHandling': 'VERIFY', 'nanHandling': 'OFF', 'language': 'FASTEXPR', 'visualization': False} | workers=3 | pending=7328 | db=C:\Users\25293\Desktop\worldquant consultant project\data\simulations.db

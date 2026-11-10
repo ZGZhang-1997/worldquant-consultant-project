@@ -1,0 +1,6 @@
+2026-11-05 13:52:07,869 INFO    MainThread simulation.batch: logging to C:\Users\25293\Desktop\worldquant consultant project\data\logs\batch-20261105-135207.log
+2026-11-05 13:52:07,885 INFO    MainThread simulation.batch: settings: {'instrumentType': 'EQUITY', 'region': 'USA', 'universe': 'TOP3000', 'delay': 1, 'decay': 4, 'neutralization': 'SUBINDUSTRY', 'truncation': 0.08, 'pasteurization': 'ON', 'unitHandling': 'VERIFY', 'nanHandling': 'OFF', 'language': 'FASTEXPR', 'visualization': False} | workers=3 | pending=1 | db=C:\Users\25293\Desktop\worldquant consultant project\data\simulations.db
+2026-11-05 13:52:09,433 INFO    ThreadPoolExecutor-0_0 worldquant_consultant_project.simulation.client: simulation submitted: https://api.worldquantbrain.com/simulations/IZ8Ga8jG4kH8IwSXDE2ALp
+2026-11-05 13:52:09,712 INFO    ThreadPoolExecutor-0_0 worldquant_consultant_project.simulation.client: simulation progress: 10%
+2026-11-05 13:52:30,820 ERROR   ThreadPoolExecutor-0_0 worldquant_consultant_project.simulation.runner: simulation failed for '-ts_corr(ts_delta(premarket_volume_weighted_avg_price, 5), p': Operator ts_delta does not support event inputs. <linkToCommonErrorMessages>Learn more</linkToCommonErrorMessages> (line 1, start 9)
+2026-11-05 13:52:30,830 INFO    MainThread simulation.batch: progress 1/1  ok=0 failed=1  2.62/min  eta 0 min

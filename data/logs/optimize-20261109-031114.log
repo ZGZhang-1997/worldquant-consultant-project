@@ -1,0 +1,3 @@
+2026-11-09 03:11:14,039 INFO    MainThread simulation.optimize: logging to C:\Users\25293\Desktop\worldquant consultant project\data\logs\optimize-20261109-031114.log
+2026-11-09 03:11:14,543 INFO    MainThread simulation.optimize: logging to C:\Users\25293\Desktop\worldquant consultant project\data\logs\optimize-20261109-031114.log
+2026-11-09 03:11:14,544 ERROR   MainThread simulation.optimize: delay must be delay0 or delay1, got 'xyz'

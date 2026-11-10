@@ -1,0 +1,4 @@
+2026-11-03 17:16:33,026 INFO    labeling: logging to C:\Users\25293\Desktop\worldquant consultant project\data\logs\label-20261103-171633.log
+2026-11-03 17:16:33,099 INFO    labeling: provider=gemini model=gemini-3.8-flash workers=8 thinking=False pending=0 prompt_sha=a088d1ae9d35
+2026-11-03 17:16:33,881 INFO    labeling: logging to C:\Users\25293\Desktop\worldquant consultant project\data\logs\label-20261103-171633.log
+2026-11-03 17:16:33,945 INFO    labeling: provider=deepseek model=deepseek-flash workers=8 thinking=False pending=0 prompt_sha=a088d1ae9d35

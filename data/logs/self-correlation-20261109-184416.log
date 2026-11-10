@@ -1,0 +1,6 @@
+2026-11-09 18:44:18,387 INFO    ThreadPoolExecutor-0_0 worldquant_consultant_project.simulation.client: self-correlation rate limited for RREgYQY1; waiting 5s (retry 1/3)
+2026-11-09 18:44:23,727 INFO    ThreadPoolExecutor-0_0 worldquant_consultant_project.simulation.client: self-correlation rate limited for RREgYQY1; waiting 10s (retry 2/3)
+2026-11-09 18:44:34,067 INFO    ThreadPoolExecutor-0_0 worldquant_consultant_project.simulation.client: self-correlation rate limited for RREgYQY1; waiting 20s (retry 3/3)
+2026-11-09 18:44:57,754 INFO    ThreadPoolExecutor-0_0 worldquant_consultant_project.simulation.client: self-correlation rate limited for d5WGmVG2; waiting 5s (retry 1/3)
+2026-11-09 18:45:03,093 INFO    ThreadPoolExecutor-0_0 worldquant_consultant_project.simulation.client: self-correlation rate limited for d5WGmVG2; waiting 10s (retry 2/3)
+2026-11-09 18:45:13,441 INFO    ThreadPoolExecutor-0_0 worldquant_consultant_project.simulation.client: self-correlation rate limited for d5WGmVG2; waiting 20s (retry 3/3)

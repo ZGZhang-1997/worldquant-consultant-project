@@ -1,0 +1,3 @@
+2026-11-06 18:14:30,254 INFO    MainThread simulation.batch: logging to C:\Users\25293\Desktop\worldquant consultant project\data\logs\batch-20261106-181430.log
+2026-11-06 18:14:30,268 INFO    MainThread simulation.batch: settings: {'instrumentType': 'EQUITY', 'region': 'USA', 'universe': 'TOP3000', 'delay': 1, 'decay': 3, 'neutralization': 'SUBINDUSTRY', 'truncation': 0.08, 'pasteurization': 'ON', 'unitHandling': 'VERIFY', 'nanHandling': 'OFF', 'language': 'FASTEXPR', 'visualization': False} | workers=3 | pending=6 | db=C:\Users\25293\Desktop\worldquant consultant project\data\simulations.db
+2026-11-06 18:14:30,715 INFO    MainThread simulation.batch: purged 5712 platform-caused run(s); unmarked 5712 alpha(s)

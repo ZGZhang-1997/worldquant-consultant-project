@@ -1,0 +1,9 @@
+2026-11-03 16:51:26,274 INFO    labeling: logging to C:\Users\25293\Desktop\worldquant consultant project\data\logs\label-20261103-165126.log
+2026-11-03 16:51:26,366 INFO    labeling: provider=gemini model=gemini-3.8-flash workers=8 thinking=False pending=4347 prompt_sha=a088d1ae9d35
+2026-11-03 16:51:30,248 WARNING worldquant_consultant_project.labeling.label: analyst4/anl4_adxqfv110_high invalid attempt 1: 输出不是合法 JSON: Expecting value: line 1 column 1 (char 0)
+2026-11-03 16:51:30,402 WARNING worldquant_consultant_project.labeling.label: analyst4/anl4_adxqfv110_low invalid attempt 1: 输出不是合法 JSON: Expecting value: line 1 column 1 (char 0)
+2026-11-03 16:51:31,418 WARNING worldquant_consultant_project.labeling.label: analyst4/anl4_adxqfv110_mean invalid attempt 1: 输出不是合法 JSON: Expecting value: line 1 column 1 (char 0)
+2026-11-03 16:51:38,654 WARNING worldquant_consultant_project.labeling.label: analyst4/anl4_afv4_div_std invalid attempt 1: 输出不是合法 JSON: Expecting value: line 1 column 1 (char 0)
+2026-11-03 16:51:48,625 WARNING worldquant_consultant_project.labeling.label: analyst4/anl4_basicconltv110_median invalid attempt 1: 输出不是合法 JSON: Expecting value: line 1 column 1 (char 0)
+2026-11-03 16:51:51,335 WARNING worldquant_consultant_project.labeling.label: analyst4/anl4_basicdetaillt_bk invalid attempt 1: 输出不是合法 JSON: Expecting ',' delimiter: line 6 column 33 (char 169)
+2026-11-03 16:51:59,901 WARNING worldquant_consultant_project.labeling.label: analyst4/anl4_capex_flag invalid attempt 1: 输出不是合法 JSON: Expecting value: line 1 column 1 (char 0)

@@ -1,0 +1,5 @@
+2026-11-09 03:50:30,946 INFO    MainThread simulation.batch: logging to C:\Users\25293\Desktop\worldquant consultant project\data\logs\batch-20261109-035030.log
+2026-11-09 03:50:31,897 INFO    MainThread worldquant_consultant_project.acquisition.client: authenticated with BRAIN API as z*********************m
+2026-11-09 03:50:32,498 INFO    MainThread acquisition.active_alphas: active alphas synced: fetched=7 upserted=7 new factors=0 skipped=0 total=7
+2026-11-09 03:50:32,499 INFO    MainThread simulation.batch: active alphas: fetched=7, new factors=0, rows=7
+2026-11-09 03:50:32,510 INFO    MainThread simulation.batch: settings: {'instrumentType': 'EQUITY', 'region': 'USA', 'universe': 'TOP3000', 'delay': 1, 'decay': 3, 'neutralization': 'SUBINDUSTRY', 'truncation': 0.08, 'pasteurization': 'ON', 'unitHandling': 'VERIFY', 'nanHandling': 'OFF', 'language': 'FASTEXPR', 'visualization': False} | workers=3 | pending=1 | db=C:\Users\25293\Desktop\worldquant consultant project\data\alpha.db

@@ -1,0 +1,364 @@
+﻿2026-11-02 11:45:16,699 INFO    acquisition: logging to C:\Users\25293\Desktop\worldquant consultant project\data\logs\crawl-20261102-114516.log
+2026-11-02 11:45:16,699 INFO    acquisition: scope instrument=EQUITY region=USA delay=1 universes=TOP3000,TOP2000,TOP1000,TOP500,TOP200,TOPSP500,MINVOL1M,ILLIQUID_MINVOL1M max_fields=None db=C:\Users\25293\Desktop\worldquant consultant project\data\brain.db
+2026-11-02 11:45:17,753 INFO    worldquant_consultant_project.acquisition.client: authenticated with BRAIN API as z***@***
+2026-11-02 11:45:18,397 INFO    worldquant_consultant_project.acquisition.crawl: universe TOP3000 valid (14 data sets)
+2026-11-02 11:45:19,038 INFO    worldquant_consultant_project.acquisition.crawl: universe TOP2000 valid (14 data sets)
+2026-11-02 11:45:19,681 INFO    worldquant_consultant_project.acquisition.crawl: universe TOP1000 valid (14 data sets)
+2026-11-02 11:45:19,978 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-sets (wait 1/200), sleeping 1.0s
+2026-11-02 11:45:21,605 INFO    worldquant_consultant_project.acquisition.crawl: universe TOP500 valid (14 data sets)
+2026-11-02 11:45:21,902 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-sets (wait 1/200), sleeping 1.0s
+2026-11-02 11:45:23,556 INFO    worldquant_consultant_project.acquisition.crawl: universe TOP200 valid (14 data sets)
+2026-11-02 11:45:24,185 INFO    worldquant_consultant_project.acquisition.crawl: universe TOPSP500 valid (14 data sets)
+2026-11-02 11:45:24,524 INFO    worldquant_consultant_project.acquisition.crawl: universe MINVOL1M valid (0 data sets)
+2026-11-02 11:45:24,823 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-sets (wait 1/200), sleeping 1.0s
+2026-11-02 11:45:26,189 INFO    worldquant_consultant_project.acquisition.crawl: universe ILLIQUID_MINVOL1M valid (0 data sets)
+2026-11-02 11:45:26,703 INFO    worldquant_consultant_project.acquisition.crawl: universe TOP3000: stored 14/14 data sets
+2026-11-02 11:45:26,703 INFO    worldquant_consultant_project.acquisition.crawl: universe TOP3000: 14 data sets to crawl
+2026-11-02 11:45:27,668 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:45:29,933 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:45:31,878 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:45:33,502 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:45:35,127 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:45:37,077 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:45:38,711 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:45:40,990 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:45:42,944 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:45:44,900 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:45:46,845 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:45:49,541 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:45:51,184 INFO    worldquant_consultant_project.acquisition.crawl: dataset TOP3000/analyst4: 1324 fields stored
+2026-11-02 11:45:51,483 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:45:53,130 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:45:54,753 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:45:57,039 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:45:58,671 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:46:00,933 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:46:02,562 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:46:04,848 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:46:06,794 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:46:08,116 INFO    worldquant_consultant_project.acquisition.crawl: dataset TOP3000/fundamental2: 766 fields stored
+2026-11-02 11:46:08,767 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:46:11,030 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:46:12,971 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:46:14,594 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:46:16,531 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:46:18,830 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:46:20,770 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:46:22,710 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:46:24,372 INFO    worldquant_consultant_project.acquisition.crawl: dataset TOP3000/fundamental6: 886 fields stored
+2026-11-02 11:46:24,670 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:46:25,993 INFO    worldquant_consultant_project.acquisition.crawl: dataset TOP3000/model16: 24 fields stored
+2026-11-02 11:46:26,324 INFO    worldquant_consultant_project.acquisition.crawl: dataset TOP3000/model51: 16 fields stored
+2026-11-02 11:46:26,949 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:46:28,894 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:46:30,522 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:46:33,130 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:46:35,073 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:46:36,699 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:46:38,647 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:46:40,608 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:46:42,547 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:46:43,867 INFO    worldquant_consultant_project.acquisition.crawl: dataset TOP3000/news12: 875 fields stored
+2026-11-02 11:46:44,493 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:46:46,119 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:46:47,444 INFO    worldquant_consultant_project.acquisition.crawl: dataset TOP3000/news18: 121 fields stored
+2026-11-02 11:46:48,072 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:46:49,396 INFO    worldquant_consultant_project.acquisition.crawl: dataset TOP3000/option8: 64 fields stored
+2026-11-02 11:46:49,693 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:46:51,340 INFO    worldquant_consultant_project.acquisition.crawl: dataset TOP3000/option9: 74 fields stored
+2026-11-02 11:46:51,664 INFO    worldquant_consultant_project.acquisition.crawl: dataset TOP3000/pv1: 24 fields stored
+2026-11-02 11:46:51,961 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:46:53,582 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:46:55,520 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:46:56,819 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 2/200), sleeping 3.0s
+2026-11-02 11:47:00,140 INFO    worldquant_consultant_project.acquisition.crawl: dataset TOP3000/pv13: 165 fields stored
+2026-11-02 11:47:00,458 INFO    worldquant_consultant_project.acquisition.crawl: dataset TOP3000/socialmedia12: 18 fields stored
+2026-11-02 11:47:00,778 INFO    worldquant_consultant_project.acquisition.crawl: dataset TOP3000/socialmedia8: 4 fields stored
+2026-11-02 11:47:01,076 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:47:02,397 INFO    worldquant_consultant_project.acquisition.crawl: dataset TOP3000/univ1: 6 fields stored
+2026-11-02 11:47:02,937 INFO    worldquant_consultant_project.acquisition.crawl: universe TOP2000: stored 14/14 data sets
+2026-11-02 11:47:02,938 INFO    worldquant_consultant_project.acquisition.crawl: universe TOP2000: 14 data sets to crawl
+2026-11-02 11:47:03,648 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:47:06,131 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:47:07,843 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:47:10,053 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:47:11,774 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:47:13,853 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:47:18,988 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:47:20,781 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:47:22,860 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:47:25,030 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:47:27,132 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:47:28,811 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:47:30,642 INFO    worldquant_consultant_project.acquisition.crawl: dataset TOP2000/analyst4: 1324 fields stored
+2026-11-02 11:47:32,571 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:47:34,659 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:47:36,860 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:47:38,992 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:47:41,092 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:47:43,608 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:47:44,985 INFO    worldquant_consultant_project.acquisition.crawl: dataset TOP2000/fundamental2: 766 fields stored
+2026-11-02 11:47:45,694 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 14.0s
+2026-11-02 11:48:01,677 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:48:03,799 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:48:05,929 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:48:08,115 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:48:10,685 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:48:13,430 INFO    worldquant_consultant_project.acquisition.crawl: dataset TOP2000/fundamental6: 886 fields stored
+2026-11-02 11:48:13,805 INFO    worldquant_consultant_project.acquisition.crawl: dataset TOP2000/model16: 24 fields stored
+2026-11-02 11:48:14,102 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:48:15,476 INFO    worldquant_consultant_project.acquisition.crawl: dataset TOP2000/model51: 16 fields stored
+2026-11-02 11:48:16,968 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:48:18,672 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:48:20,776 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:48:23,009 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:48:24,739 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:48:27,692 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:48:29,891 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:48:32,037 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:48:33,415 INFO    worldquant_consultant_project.acquisition.crawl: dataset TOP2000/news12: 875 fields stored
+2026-11-02 11:48:33,717 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:48:35,786 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:48:37,180 INFO    worldquant_consultant_project.acquisition.crawl: dataset TOP2000/news18: 121 fields stored
+2026-11-02 11:48:37,876 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:48:39,248 INFO    worldquant_consultant_project.acquisition.crawl: dataset TOP2000/option8: 64 fields stored
+2026-11-02 11:48:39,546 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:48:41,397 INFO    worldquant_consultant_project.acquisition.crawl: dataset TOP2000/option9: 74 fields stored
+2026-11-02 11:48:41,806 INFO    worldquant_consultant_project.acquisition.crawl: dataset TOP2000/pv1: 24 fields stored
+2026-11-02 11:48:42,118 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:48:44,665 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:48:46,047 INFO    worldquant_consultant_project.acquisition.crawl: dataset TOP2000/pv13: 165 fields stored
+2026-11-02 11:48:46,415 INFO    worldquant_consultant_project.acquisition.crawl: dataset TOP2000/socialmedia12: 18 fields stored
+2026-11-02 11:48:46,713 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:48:48,085 INFO    worldquant_consultant_project.acquisition.crawl: dataset TOP2000/socialmedia8: 4 fields stored
+2026-11-02 11:48:48,453 INFO    worldquant_consultant_project.acquisition.crawl: dataset TOP2000/univ1: 6 fields stored
+2026-11-02 11:48:48,971 INFO    worldquant_consultant_project.acquisition.crawl: universe TOP1000: stored 14/14 data sets
+2026-11-02 11:48:48,971 INFO    worldquant_consultant_project.acquisition.crawl: universe TOP1000: 14 data sets to crawl
+2026-11-02 11:48:50,117 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:48:52,187 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 7.0s
+2026-11-02 11:48:59,886 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:49:02,005 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:49:04,099 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:49:05,818 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:49:07,946 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:49:09,657 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:49:11,806 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:49:13,934 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:49:16,020 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:49:17,818 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:49:21,144 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:49:22,908 INFO    worldquant_consultant_project.acquisition.crawl: dataset TOP1000/analyst4: 1324 fields stored
+2026-11-02 11:49:24,078 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:49:27,101 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:49:30,104 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:49:31,797 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:49:33,911 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:49:35,619 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:49:37,440 INFO    worldquant_consultant_project.acquisition.crawl: dataset TOP1000/fundamental2: 766 fields stored
+2026-11-02 11:49:38,133 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:49:39,824 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:49:42,718 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:49:45,971 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:49:47,659 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:49:50,140 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 10.0s
+2026-11-02 11:50:00,838 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:50:02,751 INFO    worldquant_consultant_project.acquisition.crawl: dataset TOP1000/fundamental6: 886 fields stored
+2026-11-02 11:50:03,050 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:50:04,432 INFO    worldquant_consultant_project.acquisition.crawl: dataset TOP1000/model16: 24 fields stored
+2026-11-02 11:50:04,730 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:50:06,106 INFO    worldquant_consultant_project.acquisition.crawl: dataset TOP1000/model51: 16 fields stored
+2026-11-02 11:50:06,816 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:50:09,788 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:50:12,006 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:50:14,594 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:50:16,714 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:50:19,759 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:50:21,542 INFO    worldquant_consultant_project.acquisition.crawl: dataset TOP1000/news12: 875 fields stored
+2026-11-02 11:50:22,819 INFO    worldquant_consultant_project.acquisition.crawl: dataset TOP1000/news18: 121 fields stored
+2026-11-02 11:50:23,127 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:50:24,831 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:50:26,245 INFO    worldquant_consultant_project.acquisition.crawl: dataset TOP1000/option8: 64 fields stored
+2026-11-02 11:50:26,930 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:50:28,307 INFO    worldquant_consultant_project.acquisition.crawl: dataset TOP1000/option9: 74 fields stored
+2026-11-02 11:50:28,691 INFO    worldquant_consultant_project.acquisition.crawl: dataset TOP1000/pv1: 24 fields stored
+2026-11-02 11:50:28,991 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:50:30,678 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:50:32,803 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:50:34,187 INFO    worldquant_consultant_project.acquisition.crawl: dataset TOP1000/pv13: 165 fields stored
+2026-11-02 11:50:34,544 INFO    worldquant_consultant_project.acquisition.crawl: dataset TOP1000/socialmedia12: 18 fields stored
+2026-11-02 11:50:34,842 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:50:36,213 INFO    worldquant_consultant_project.acquisition.crawl: dataset TOP1000/socialmedia8: 4 fields stored
+2026-11-02 11:50:36,586 INFO    worldquant_consultant_project.acquisition.crawl: dataset TOP1000/univ1: 6 fields stored
+2026-11-02 11:50:36,883 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-sets (wait 1/200), sleeping 1.0s
+2026-11-02 11:50:38,393 INFO    worldquant_consultant_project.acquisition.crawl: universe TOP500: stored 14/14 data sets
+2026-11-02 11:50:38,394 INFO    worldquant_consultant_project.acquisition.crawl: universe TOP500: 14 data sets to crawl
+2026-11-02 11:50:39,080 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:50:40,760 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:50:43,781 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:50:46,806 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:50:50,012 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:50:51,719 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:50:53,807 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 6.0s
+2026-11-02 11:51:01,747 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:51:03,917 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:51:06,054 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:51:07,764 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:51:09,223 INFO    worldquant_consultant_project.acquisition.crawl: dataset TOP500/analyst4: 1324 fields stored
+2026-11-02 11:51:10,989 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:51:13,108 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:51:16,138 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:51:19,963 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:51:21,326 INFO    worldquant_consultant_project.acquisition.crawl: dataset TOP500/fundamental2: 766 fields stored
+2026-11-02 11:51:22,009 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:51:23,699 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:51:25,809 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:51:27,896 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:51:30,004 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:51:32,070 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:51:33,755 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:51:37,048 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:51:38,999 INFO    worldquant_consultant_project.acquisition.crawl: dataset TOP500/fundamental6: 886 fields stored
+2026-11-02 11:51:39,407 INFO    worldquant_consultant_project.acquisition.crawl: dataset TOP500/model16: 24 fields stored
+2026-11-02 11:51:39,705 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:51:41,100 INFO    worldquant_consultant_project.acquisition.crawl: dataset TOP500/model51: 16 fields stored
+2026-11-02 11:51:43,595 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:51:46,130 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:51:47,819 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 12.0s
+2026-11-02 11:52:03,566 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:52:04,960 INFO    worldquant_consultant_project.acquisition.crawl: dataset TOP500/news12: 875 fields stored
+2026-11-02 11:52:06,072 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:52:07,455 INFO    worldquant_consultant_project.acquisition.crawl: dataset TOP500/news18: 121 fields stored
+2026-11-02 11:52:07,753 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:52:09,563 INFO    worldquant_consultant_project.acquisition.crawl: dataset TOP500/option8: 64 fields stored
+2026-11-02 11:52:09,861 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:52:11,748 INFO    worldquant_consultant_project.acquisition.crawl: dataset TOP500/option9: 74 fields stored
+2026-11-02 11:52:12,046 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:52:13,439 INFO    worldquant_consultant_project.acquisition.crawl: dataset TOP500/pv1: 24 fields stored
+2026-11-02 11:52:13,738 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:52:15,827 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:52:17,621 INFO    worldquant_consultant_project.acquisition.crawl: dataset TOP500/pv13: 165 fields stored
+2026-11-02 11:52:17,920 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:52:19,287 INFO    worldquant_consultant_project.acquisition.crawl: dataset TOP500/socialmedia12: 18 fields stored
+2026-11-02 11:52:19,651 INFO    worldquant_consultant_project.acquisition.crawl: dataset TOP500/socialmedia8: 4 fields stored
+2026-11-02 11:52:19,950 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:52:21,339 INFO    worldquant_consultant_project.acquisition.crawl: dataset TOP500/univ1: 6 fields stored
+2026-11-02 11:52:21,875 INFO    worldquant_consultant_project.acquisition.crawl: universe TOP200: stored 14/14 data sets
+2026-11-02 11:52:21,876 INFO    worldquant_consultant_project.acquisition.crawl: universe TOP200: 14 data sets to crawl
+2026-11-02 11:52:22,565 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:52:25,096 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:52:27,791 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:52:31,097 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:52:32,780 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:52:36,091 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:52:39,144 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:52:40,842 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:52:42,934 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:52:44,639 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:52:46,150 INFO    worldquant_consultant_project.acquisition.crawl: dataset TOP200/analyst4: 1324 fields stored
+2026-11-02 11:52:48,155 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 11.0s
+2026-11-02 11:53:01,130 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:53:02,823 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:53:04,982 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:53:07,737 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:53:09,515 INFO    worldquant_consultant_project.acquisition.crawl: dataset TOP200/fundamental2: 766 fields stored
+2026-11-02 11:53:10,658 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:53:12,809 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:53:15,734 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:53:17,827 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:53:20,724 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:53:23,397 INFO    worldquant_consultant_project.acquisition.crawl: dataset TOP200/fundamental6: 886 fields stored
+2026-11-02 11:53:23,778 INFO    worldquant_consultant_project.acquisition.crawl: dataset TOP200/model16: 24 fields stored
+2026-11-02 11:53:24,075 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:53:25,500 INFO    worldquant_consultant_project.acquisition.crawl: dataset TOP200/model51: 16 fields stored
+2026-11-02 11:53:25,798 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:53:30,006 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:53:31,692 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:53:33,786 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:53:35,866 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:53:38,032 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:53:40,117 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:53:41,806 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:53:43,180 INFO    worldquant_consultant_project.acquisition.crawl: dataset TOP200/news12: 875 fields stored
+2026-11-02 11:53:43,861 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:53:45,630 INFO    worldquant_consultant_project.acquisition.crawl: dataset TOP200/news18: 121 fields stored
+2026-11-02 11:53:45,930 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:53:47,636 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:53:49,054 INFO    worldquant_consultant_project.acquisition.crawl: dataset TOP200/option8: 64 fields stored
+2026-11-02 11:53:49,352 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 10.0s
+2026-11-02 11:54:00,114 INFO    worldquant_consultant_project.acquisition.crawl: dataset TOP200/option9: 74 fields stored
+2026-11-02 11:54:00,516 INFO    worldquant_consultant_project.acquisition.crawl: dataset TOP200/pv1: 24 fields stored
+2026-11-02 11:54:00,816 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:54:03,020 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:54:04,792 INFO    worldquant_consultant_project.acquisition.crawl: dataset TOP200/pv13: 165 fields stored
+2026-11-02 11:54:05,090 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:54:06,544 INFO    worldquant_consultant_project.acquisition.crawl: dataset TOP200/socialmedia12: 18 fields stored
+2026-11-02 11:54:06,843 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:54:08,199 INFO    worldquant_consultant_project.acquisition.crawl: dataset TOP200/socialmedia8: 4 fields stored
+2026-11-02 11:54:08,575 INFO    worldquant_consultant_project.acquisition.crawl: dataset TOP200/univ1: 6 fields stored
+2026-11-02 11:54:08,874 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-sets (wait 1/200), sleeping 1.0s
+2026-11-02 11:54:10,427 INFO    worldquant_consultant_project.acquisition.crawl: universe TOPSP500: stored 14/14 data sets
+2026-11-02 11:54:10,428 INFO    worldquant_consultant_project.acquisition.crawl: universe TOPSP500: 14 data sets to crawl
+2026-11-02 11:54:11,123 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:54:12,823 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:54:14,950 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:54:16,628 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:54:18,725 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:54:21,865 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:54:23,573 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:54:26,099 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:54:27,783 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:54:31,053 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:54:33,727 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:54:35,868 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:54:37,291 INFO    worldquant_consultant_project.acquisition.crawl: dataset TOPSP500/analyst4: 1324 fields stored
+2026-11-02 11:54:37,604 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:54:39,682 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:54:42,143 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:54:43,832 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:54:48,136 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:54:50,632 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:54:52,003 INFO    worldquant_consultant_project.acquisition.crawl: dataset TOPSP500/fundamental2: 766 fields stored
+2026-11-02 11:54:52,682 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:54:54,815 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:54:56,587 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 3.0s
+2026-11-02 11:55:02,032 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:55:04,648 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:55:08,047 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:55:09,433 INFO    worldquant_consultant_project.acquisition.crawl: dataset TOPSP500/fundamental6: 886 fields stored
+2026-11-02 11:55:09,822 INFO    worldquant_consultant_project.acquisition.crawl: dataset TOPSP500/model16: 24 fields stored
+2026-11-02 11:55:10,121 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:55:11,495 INFO    worldquant_consultant_project.acquisition.crawl: dataset TOPSP500/model51: 16 fields stored
+2026-11-02 11:55:11,794 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:55:13,892 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:55:15,982 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:55:18,092 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:55:19,806 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:55:21,878 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:55:23,990 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:55:25,789 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:55:27,963 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:55:29,690 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:55:31,762 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:55:33,165 INFO    worldquant_consultant_project.acquisition.crawl: dataset TOPSP500/news12: 875 fields stored
+2026-11-02 11:55:33,875 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:55:35,643 INFO    worldquant_consultant_project.acquisition.crawl: dataset TOPSP500/news18: 121 fields stored
+2026-11-02 11:55:35,942 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:55:37,627 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:55:38,995 INFO    worldquant_consultant_project.acquisition.crawl: dataset TOPSP500/option8: 64 fields stored
+2026-11-02 11:55:39,704 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:55:41,085 INFO    worldquant_consultant_project.acquisition.crawl: dataset TOPSP500/option9: 74 fields stored
+2026-11-02 11:55:41,458 INFO    worldquant_consultant_project.acquisition.crawl: dataset TOPSP500/pv1: 24 fields stored
+2026-11-02 11:55:42,152 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:55:43,872 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:55:45,557 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:55:46,946 INFO    worldquant_consultant_project.acquisition.crawl: dataset TOPSP500/pv13: 165 fields stored
+2026-11-02 11:55:47,337 INFO    worldquant_consultant_project.acquisition.crawl: dataset TOPSP500/socialmedia12: 18 fields stored
+2026-11-02 11:55:47,637 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-fields (wait 1/200), sleeping 1.0s
+2026-11-02 11:55:49,008 INFO    worldquant_consultant_project.acquisition.crawl: dataset TOPSP500/socialmedia8: 4 fields stored
+2026-11-02 11:55:49,372 INFO    worldquant_consultant_project.acquisition.crawl: dataset TOPSP500/univ1: 6 fields stored
+2026-11-02 11:55:49,672 INFO    worldquant_consultant_project.acquisition.client: rate limited on /data-sets (wait 1/200), sleeping 1.0s
+2026-11-02 11:55:51,020 INFO    worldquant_consultant_project.acquisition.crawl: universe MINVOL1M: stored 0/0 data sets
+2026-11-02 11:55:51,021 INFO    worldquant_consultant_project.acquisition.crawl: universe MINVOL1M: 0 data sets to crawl
+2026-11-02 11:55:51,373 INFO    worldquant_consultant_project.acquisition.crawl: universe ILLIQUID_MINVOL1M: stored 0/0 data sets
+2026-11-02 11:55:51,374 INFO    worldquant_consultant_project.acquisition.crawl: universe ILLIQUID_MINVOL1M: 0 data sets to crawl
+2026-11-02 11:55:51,412 INFO    acquisition: done: universes valid=8 invalid=0, data sets done=84 failed=0, fields stored=26202
